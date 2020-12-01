@@ -44,8 +44,8 @@ int main()
     std::ifstream ifs(root + "/prova.txt", std::ios::binary);
     std::ofstream ofs(root + "/output.txt", std::ios::binary);
 
-
-    { // you can use block to limit lifetime of the vector
+    while(!ifs.eof())
+    {
         std::vector<char> buffer( CHUNK_SIZE );
         ifs.read( buffer.data(), buffer.size() );
         std::streamsize ssize=ifs.gcount();
