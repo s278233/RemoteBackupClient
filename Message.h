@@ -5,6 +5,7 @@
 #ifndef REMOTEBACKUPCLIENT_MESSAGE_H
 #define REMOTEBACKUPCLIENT_MESSAGE_H
 
+
 //Types
 //-1    =       Error
 //0     =       Auth_Message
@@ -12,20 +13,21 @@
 //2     =
 
 #include <string>
-#include <boost/archive/binary_oarchive.hpp>
 #include <fstream>
-
-using namespace boost::archive;
-
+#include <utility>
+#include <openssl/sha.h>
+#include <vector>
+#include <iostream>
 
 class Message {
     int type;
-    binary_oarchive oba();
+    std::vector<char> data;
+    size_t size;
+    unsigned char hash[SHA256_DIGEST_LENGTH]{};
 
-    void write(std::ofstream ofs){
-
-    }
-
+public:
+    Message(int type, std::vector<char> data, size_t size);
+    bool checkHash();
 };
 
 
