@@ -4,6 +4,7 @@
 #include "Message.h"
 #include <sstream>
 #include <boost/asio.hpp>
+#include "FileWatcher.h"
 
 
 
@@ -66,33 +67,55 @@ int main()
 
 
 
-    std::ostringstream os;
-    os << buffer;
-    binary_oarchive oa(os);
-
-    auto message = Message(0, buffer, size);
-
-    std::ostringstream archive_stream;
-    auto oba = binary_oarchive(archive_stream);
-    oba << message;
-    std::string outbound_data_ = archive_stream.str();
-
-    io_context ioc;
-    tcp::socket socket(ioc);
-    socket.connect(tcp::endpoint(address::from_string("127.0.0.1"),5001));
-
-    std::size_t sizeW;
-
-    boost::asio::async_write(socket, boost::asio::buffer(outbound_data_),
-                             [&sizeW](const boost::system::error_code& error, std::size_t bytes_transferred){
-        sizeW = bytes_transferred;
-        if(error != 0) throw std::runtime_error(error.message());
-    });
-
-
+//    std::ostringstream os;
+//    os << buffer;
+//    binary_oarchive oa(os);
+//
+//    auto message = Message(0, buffer, size);
+//
+//    std::ostringstream archive_stream;
+//    auto oba = binary_oarchive(archive_stream);
+//    oba << message;
+//    std::string outbound_data_ = archive_stream.str();
+//
+//    io_context ioc;
+//    tcp::socket socket(ioc);
+//    socket.connect(tcp::endpoint(address::from_string("127.0.0.1"),5001));
+//
+//    std::size_t sizeW;
+//
+//    boost::asio::async_write(socket, boost::asio::buffer(outbound_data_),
+//                             [&sizeW](const boost::system::error_code& error, std::size_t bytes_transferred){
+//        sizeW = bytes_transferred;
+//        if(error != 0) throw std::runtime_error(error.message());
+//    });
 
 
+    //Create a FileWatcher instance that will check the current folder for changes every 5 seconds
+    FileWatcher fw{ROOT, std::chrono::milliseconds(5000)};//5 sec of delay
 
+    // Start monitoring a folder for changes and (in case of changes)
+    // run a user provided lambda function
+    fw.start([] (const std::string& path_to_watch, FileStatus status) -> void {
+        // Process only regular files, all other file types are ignored
+        if(!std::filesystem::is_regular_file(std::filesystem::path(path_to_watch)) && status != FileStatus::erased) {
+            return;
+        }
+
+        switch(status) {
+            case FileStatus::created:
+                std::cout << "File created: " << path_to_watch << '\n';
+                break;
+                case FileStatus::modified:
+                    std::cout << "File modified: " << path_to_watch << '\n';
+                    break;
+                case FileStatus::erased:
+                    std::cout << "File erased: " << path_to_watch << '\n';
+                    break;
+                default:
+                    std::cout << "Error! Unknown file status.\n";
+                     }
+            });
 
     return 0;
 }
