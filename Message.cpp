@@ -6,17 +6,16 @@
 #include <cstring>
 
 
-Message::Message(int type, std::vector<char> data, size_t size) : type(type), data(std::move(data)), size(size) {
-
-    if(!this->data.empty()) {
+Message::Message(int type, std::vector<char> data) : type(type), data(std::move(data)) {
 
         SHA256_CTX sha256;
         SHA256_Init(&sha256);
         SHA256_Update(&sha256, this->data.data(), this->data.size());
         SHA256_Final(hash, &sha256);
-    }
-
 }
+
+Message::Message(int type): type(type){}
+
 
 bool Message::checkHash() {
 
@@ -34,7 +33,28 @@ bool Message::checkHash() {
     return isEqual;
 }
 
-Message::Message() {
-    type = -100;
-    size = -1;
+const std::vector<char> &Message::getData() const {
+    return data;
 }
+
+int Message::getType() const {
+    return type;
+}
+
+Message::Message(const Message &m) {
+    this->type = m.type;
+    this->data = m.data;
+    memcpy(this->hash, m.hash, SHA256_DIGEST_LENGTH);
+}
+
+Message::Message() {
+    this->type = -100;
+}
+
+Message &Message::operator=(const Message &m) {
+    this->type = m.type;
+    this->data = m.data;
+    memcpy(this->hash, m.hash, SHA256_DIGEST_LENGTH);
+    return *this;
+}
+

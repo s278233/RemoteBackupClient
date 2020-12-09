@@ -5,12 +5,15 @@
 #ifndef REMOTEBACKUPCLIENT_MESSAGE_H
 #define REMOTEBACKUPCLIENT_MESSAGE_H
 
-
-//Types
-//-1    =       Error_Msg
-//0     =       Header
-//1     =       Auth_Message
-//2     =
+//Error types
+#define FILE_ERR -2
+#define AUTH_ERR -1
+#define AUTH_REQ 0
+#define AUTH_RES 1
+#define AUTH_OK 2
+#define FILE_START 2
+#define FILE_DATA 3
+#define FILE_END 4
 
 #include <string>
 #include <fstream>
@@ -24,25 +27,27 @@
 
 class Message {
     int type;
-    std::vector<char> data;
-    size_t size;
-    unsigned char hash[SHA256_DIGEST_LENGTH];
+    std::vector<char> data{};
+    unsigned char hash[SHA256_DIGEST_LENGTH]{};
 
 public:
     Message();
-    Message(int type, std::vector<char> data, size_t size);
+    Message(int type);
+    Message(int type, std::vector<char> data);
+    Message(const Message& m);
+    Message& operator= (const Message &m);
+    int getType() const;
+    const std::vector<char> &getData() const;
     bool checkHash();
-    template<class Archive>
-    void serialize(Archive& ar, const unsigned int version){
+    template<class Archive> void serialize(Archive& ar, const unsigned int version){
         ar & type;      //Se Archive è un output archive allora & è uguale a <<
         ar & data;      //Se Archive è un input  archive allora & è uguale a >>
-        ar & size;
         ar & hash;
     };     //Funzione di supporto per gli archive di boost
 
     friend std::ostream& operator<<(std::ostream &out, Message& m)
     {
-        out << m.type << " " << m.data.data() << " " << m.size << " " << m.hash <<std::endl;
+        out << m.type << " " << m.data.data() << " " << m.hash <<std::endl;
         return out;
     }
 
