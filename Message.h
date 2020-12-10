@@ -15,6 +15,8 @@
 #define FILE_DATA 3
 #define FILE_END 4
 
+#define HEADER_LENGTH 8
+
 #include <string>
 #include <fstream>
 #include <utility>
@@ -23,6 +25,15 @@
 #include <iostream>
 #include <boost/serialization/access.hpp>
 #include <boost/serialization/vector.hpp>
+#include <boost/asio.hpp>
+#include <boost/archive/text_oarchive.hpp>
+#include <boost/archive/text_iarchive.hpp>
+#include <boost/weak_ptr.hpp>
+
+
+using namespace boost::archive;
+using namespace boost::asio;
+using namespace boost::asio::ip;
 
 
 class Message {
@@ -52,6 +63,12 @@ public:
     }
 
     friend class boost::serialization::access;
+
+    void syncWrite(const boost::weak_ptr<tcp::socket> &socket_wptr,
+                   size_t (*connectionHandler)(const boost::system::error_code &, size_t));
+
+    void syncRead(const boost::weak_ptr<tcp::socket> &socket_wptr,
+                     size_t (*connectionHandler)(const boost::system::error_code &, size_t));
 };
 
 
