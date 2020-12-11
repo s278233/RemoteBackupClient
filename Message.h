@@ -65,10 +65,10 @@ public:
     friend class boost::serialization::access;
 
     void syncWrite(const boost::weak_ptr<tcp::socket> &socket_wptr,
-                   size_t (*connectionHandler)(const boost::system::error_code &, size_t));
+                   void(*connectionHandler)()) const;
 
     void syncRead(const boost::weak_ptr<tcp::socket> &socket_wptr,
-                     size_t (*connectionHandler)(const boost::system::error_code &, size_t));
+                     void (*connectionHandler)());
 };
 
 

@@ -61,7 +61,9 @@ Message &Message::operator=(const Message &m) {
     return *this;
 }
 
-void Message::syncWrite(const boost::weak_ptr<tcp::socket>& socket_wptr, std::size_t connectionHandler(const boost::system::error_code& error, std::size_t bytes_transferred)){
+void Message::syncWrite(const boost::weak_ptr<tcp::socket>& socket_wptr, void connectionHandler()) const{
+
+    boost::system::error_code ec;
 
     //Serializzazione messaggio
     std::ostringstream archive_stream;
@@ -80,19 +82,29 @@ void Message::syncWrite(const boost::weak_ptr<tcp::socket>& socket_wptr, std::si
     std::vector<boost::asio::const_buffer> buffers;
     buffers.emplace_back(boost::asio::buffer(outbound_header_));
     buffers.emplace_back(boost::asio::buffer(outbound_data_));
-    sizeW = boost::asio::write((*socket_wptr.lock()), buffers);
+    sizeW = boost::asio::write((*socket_wptr.lock()), buffers, boost::asio::transfer_exactly(buffers[0].size() + buffers[1].size()), ec);
+
+    if(ec != 0) {
+        if ((ec == boost::asio::error::eof) || (ec == boost::asio::error::connection_reset)) connectionHandler();
+        else throw std::runtime_error(ec.message());
+    }
 
     if(sizeW != (buffers[0].size() + buffers[1].size())) throw std::runtime_error("Write Error");
 }
 
-void Message::syncRead(const boost::weak_ptr<tcp::socket>& socket_wptr, std::size_t connectionHandler(const boost::system::error_code& error, std::size_t bytes_transferred)){
+void Message::syncRead(const boost::weak_ptr<tcp::socket>& socket_wptr, void connectionHandler()){
 
     std::vector<char> header(HEADER_LENGTH);
     size_t message_length;
     size_t sizeR;
+    boost::system::error_code ec;
 
     //Ricezione Header
-    sizeR = boost::asio::read((*socket_wptr.lock()), boost::asio::buffer(header));
+    sizeR = boost::asio::read((*socket_wptr.lock()), boost::asio::buffer(header), boost::asio::transfer_exactly(HEADER_LENGTH), ec);
+    if(ec != 0) {
+        if ((ec == boost::asio::error::eof) || (ec == boost::asio::error::connection_reset)) connectionHandler();
+        else throw std::runtime_error(ec.message());
+    }
 
     if(sizeR != header.size()) throw std::runtime_error("Broken Header");
 
@@ -102,7 +114,11 @@ void Message::syncRead(const boost::weak_ptr<tcp::socket>& socket_wptr, std::siz
 
     //Ricezione Messaggio
     std::vector<char> message(message_length);
-    sizeR = boost::asio::read((*socket_wptr.lock()), boost::asio::buffer(message));
+    sizeR = boost::asio::read((*socket_wptr.lock()), boost::asio::buffer(message), boost::asio::transfer_exactly(message_length), ec);
+    if(ec != 0) {
+        if ((ec == boost::asio::error::eof) || (ec == boost::asio::error::connection_reset)) connectionHandler();
+        else throw std::runtime_error(ec.message());
+    }
 
     if(sizeR != message_length) throw std::runtime_error("Broken Message");
 

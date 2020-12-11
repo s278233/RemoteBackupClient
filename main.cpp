@@ -38,15 +38,10 @@ std::list<std::pair<std::string,FileStatus>> upload_pool;
 
 std::list<std::string> path_ignore_pool;
 
-std::size_t errorConnectionHandler(const boost::system::error_code& error, std::size_t bytes_transferred){
-    if(error != 0){
-        if ((error == boost::asio::error::eof) || (error == boost::asio::error::connection_reset)) {
-            connection_cv.notify_one();//prova a riconnettersi
-            std::unique_lock<std::mutex> lck(connection_mtx);
-            connection_cv.wait(lck);
-        } else throw std::runtime_error(error.message());
-    }
-    return bytes_transferred;
+void errorConnectionHandler(){
+    connection_cv.notify_one();//prova a riconnettersi
+    std::unique_lock<std::mutex> lck(connection_mtx);
+    connection_cv.wait(lck);
 }
 
 void FileWatcherThread(FileWatcher fw){
