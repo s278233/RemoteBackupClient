@@ -1,11 +1,8 @@
 #include <boost/filesystem.hpp>
-#include <boost/archive/text_oarchive.hpp>
-#include <boost/archive/text_iarchive.hpp>
 #include <iostream>
 #include <csignal>
 #include "Message.h"
 #include "FileWatcher.h"
-
 
 #define RECONN_DELAY 5
 
@@ -144,6 +141,7 @@ void FileDownloaderDispatcherThread(){
 
                 if (message.getType() == FILE_END) {
                     ofs.close();
+                    path_ignore_pool.pop_back();
                     break;
                 }
 
@@ -157,9 +155,6 @@ void FileDownloaderDispatcherThread(){
                 ofs << message.getData();
 
             }
-
-            path_ignore_pool.pop_back();
-
         }
     } catch (const std::runtime_error& e) {
         std::cout<<e.what()<<std::endl;
@@ -260,7 +255,10 @@ int main(int argc, char* argv[])
     running.store(true);
 
     //Inizializzo il filewatcher (viene effettuato un primo controllo all'avvio sui file)
-    FileWatcher fw{ROOT, std::chrono::milliseconds(5000)};//5 sec of delay
+    FileWatcher fw{ROOT, std::chrono::milliseconds(5000), running};//5 sec of delay
+
+    //Scambio lista file
+    //message = Message(5, fw.getPaths());
 
     //Avvio il thread che gestisce il FileWatcher
     std::thread fwt(FileWatcherThread, fw);
