@@ -13,11 +13,12 @@
 Message::Message(const Message &m) {
     this->type = m.type;
     this->data = m.data;
-    memcpy(this->hash, m.hash, SHA256_DIGEST_LENGTH);
+    this->hash= m.hash;
 }
 
 //Costruttore di movimento
-Message::Message(Message &&src) noexcept : type(INVALID), hash(nullptr) {
+Message::Message(Message &&src) noexcept : type(INVALID){
+    this->hash.clear();
     swap(*this, src);
 }
 
@@ -31,19 +32,19 @@ Message &Message::operator=(const Message &src) {
 //Overload operatore di assegnazione tramite movimento
 Message &Message::operator=(Message&& src) noexcept{
     swap(*this, src);
+    return *this;
 }
 
 //Distruttore
-Message::~Message() { delete [] hash; }
+Message::~Message() = default;
 
 //Costruttore per messaggio vuoto
 Message::Message() {
     this->type = INVALID;
-    this->hash = nullptr;
 }
 
 //Costruttore per messaggio senza dato
-Message::Message(int type): type(type), hash(nullptr){}
+Message::Message(int type): type(type){}
 
 //Costruttore per dato generico
 Message::Message(int type, std::vector<char> data) : type(type), data(std::move(data)) {
@@ -55,7 +56,7 @@ Message::Message(const std::pair<std::string, std::string>& authData) {
     this->type = AUTH_RES;
     std::string tmp;
 
-    tmp += UDEL + authData.first + PDEL + authData.second;
+    tmp += authData.first + UDEL + authData.second + PDEL;
 
     this->data = std::vector<char>(tmp.begin(), tmp.end());
 
@@ -64,13 +65,14 @@ Message::Message(const std::pair<std::string, std::string>& authData) {
 }
 
 //Costruttore per mappa <file/directory, hash>
-Message::Message(const std::unordered_map<std::string, unsigned char *>& fileList) {
+Message::Message(const std::unordered_map<std::string, std::string>& fileList) {
     this->type = FILE_LIST;
     std::string tmp;
 
     for (const auto & file : fileList) {
-        tmp += FDEL + file.first + HDEL;
-        if(file.second)  tmp+=(*file.second);
+        tmp += file.first + FDEL;
+        if(!file.second.empty())  tmp+=(file.second);
+        tmp+=HDEL;
     }
 
     this->data = std::vector<char>(tmp.begin(), tmp.end());
@@ -91,7 +93,10 @@ void swap(Message &src, Message &dst) {
 //ToString
 std::ostream& operator<<(std::ostream &out, Message& m)
 {
-    out << m.type << " " << m.data.data() << " " << m.hash <<std::endl;
+    out << "TIPO:"<< std::quoted(std::to_string(m.type));
+    if(!m.data.empty()) out << " DATA:" << std::quoted(m.data.data());
+    if(!m.hash.empty()) out << " HASH:" << std::quoted(m.hash);
+    out<<std::endl;
     return out;
 }
 
@@ -114,24 +119,18 @@ template<class Archive> void Message::serialize(Archive& ar, const unsigned int 
 //Verifica integrità messaggio
 bool Message::checkHash() {
 
-    if(this->data.empty()) return -1;
+    if(this->data.empty() || this->hash.empty()) return false;
 
-    unsigned char hashRecomputed[SHA256_DIGEST_LENGTH];
+    Message tmp(INVALID, this->data);
 
-    SHA256_CTX sha256;
-    SHA256_Init(&sha256);
-    SHA256_Update(&sha256, this->data.data(), this->data.size());
-    SHA256_Final(hashRecomputed, &sha256);
-
-    bool isEqual = (memcmp(hash, hashRecomputed, SHA256_DIGEST_LENGTH) == 0);
-
-    return isEqual;
+    if(this->hash == tmp.hash) return true;
+    else return false;
 }
 
 //Estrazione pair<username, password> dal campo data
-std::pair<std::string, std::string> Message::extractAuthData(){
+std::optional<std::pair<std::string, std::string>> Message::extractAuthData(){
 
-    if(this->type != AUTH_RES) throw std::runtime_error("Extraction failed: type is wrong!");
+    if(this->type != AUTH_RES) return std::optional<std::pair<std::string, std::string>>();
 
     std::string codedAuthData(this->data.begin(), this->data.end());
 
@@ -142,43 +141,39 @@ std::pair<std::string, std::string> Message::extractAuthData(){
     //Estrazione USERNAME
     pos = codedAuthData.find(UDEL);
     username = codedAuthData.substr(0, pos);
-    codedAuthData.erase(0, pos + sizeof(UDEL) + username.length());
+    codedAuthData.erase(0,pos + sizeof(UDEL) - 1);
 
     //Estrazione PASSWORD
     pos = codedAuthData.find(PDEL);
     password = codedAuthData.substr(0,  pos);
-    codedAuthData.erase(0, pos + sizeof(PDEL) + password.length());
+    codedAuthData.erase(0, pos + sizeof(PDEL) - 1);
 
     return std::pair(username, password);
 }
 
 //Estrazione mappa<file/directory, hash> dal campo data
-std::unordered_map<std::string, unsigned char *> Message::extractFileList(){
+std::optional<std::unordered_map<std::string, std::string>> Message::extractFileList(){
 
-    if(this->type != FILE_LIST) throw std::runtime_error("Extraction failed: type is wrong!");
+    if(this->type != FILE_LIST) return std::optional<std::unordered_map<std::string, std::string>>();
 
-    std::unordered_map<std::string, unsigned char *> decodedFileList;
+    std::unordered_map<std::string, std::string> decodedFileList;
     std::string codedFileList(this->data.begin(), this->data.end());
 
     size_t pos = 0;
     std::string file;
     std::string hash_;
-    unsigned char* hash_ptr;
     while ((pos = codedFileList.find(FDEL)) != std::string::npos) {
         //Estrazione FILE
         file = codedFileList.substr(0, pos);
-        codedFileList.erase(0, pos + sizeof(FDEL) + file.length());
+        codedFileList.erase(0, pos + sizeof(FDEL) - 1);
 
         //Estrazione HASH
         pos = codedFileList.find(HDEL);
         hash_ = codedFileList.substr(0,  pos);
-        codedFileList.erase(0, pos + sizeof(HDEL) + hash_.length());
+        codedFileList.erase(0, pos + sizeof(HDEL) - 1);
         if(!hash_.empty()) {
-            hash_ptr = new unsigned char[SHA256_DIGEST_LENGTH]();
-            memcpy(hash_ptr, hash_.c_str(), SHA256_DIGEST_LENGTH);
-            decodedFileList[file] = hash_ptr;
-            hash_ptr = nullptr;
-        } else decodedFileList[file] = nullptr;
+            decodedFileList[file] = hash_;
+        } else decodedFileList[file] = "";
     }
 
     return decodedFileList;
@@ -258,8 +253,20 @@ void Message::syncWrite(const boost::weak_ptr<tcp::socket>& socket_wptr, void co
 
 //Riempimento del campo hash
 void Message::hashData(){
+
+    unsigned char tmp[SHA256_DIGEST_LENGTH];
+
+    //Calcolo hash
     SHA256_CTX sha256;
     SHA256_Init(&sha256);
     SHA256_Update(&sha256, this->data.data(), this->data.size());
-    SHA256_Final(hash, &sha256);
+    SHA256_Final(tmp, &sha256);
+
+    //Conversione da unisgned char a string
+    char hash_[2*SHA256_DIGEST_LENGTH+1];
+    hash_[2*SHA256_DIGEST_LENGTH] = 0;
+    for (int i = 0; i < SHA256_DIGEST_LENGTH; i++)
+        sprintf(hash_+i*2, "%02x", tmp[i]);
+
+    this->hash = std::string(hash_);
 }

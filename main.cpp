@@ -198,6 +198,35 @@ void signal_callback_handler(int signum) {
 
 int main(int argc, char* argv[])
 {
+    std::pair<std::string, std::string> authData("gold", "experience");
+    std::unordered_map<std::string, std::string> paths;
+    paths["fileciccione"] = "hashfauso";
+    paths["filepiccolo"] = "hashassaifauso";
+
+    //Prove costruzione
+    Message m_auth(authData);
+
+    Message m_paths(paths);
+
+    std::cout<<m_auth<<std::endl;
+    std::cout<<m_auth.checkHash()<<std::endl;
+
+    std::cout<<m_paths<<std::endl;
+    std::cout<<m_paths.checkHash()<<std::endl;
+
+    //Prova estrazione
+    auto r_auth = m_auth.extractAuthData();
+    auto r_paths = m_paths.extractFileList();
+
+    std::cout<<r_auth->first<<" "<<r_auth->second<<std::endl;
+
+    for(const auto& r:*r_paths)
+        std::cout<<r.first<<" "<<r.second<<std::endl;
+
+    return 0;
+
+
+
     //Signal Handler(Chiusura con Ctrl+C)
     signal(SIGINT, signal_callback_handler);
 
