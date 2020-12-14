@@ -96,7 +96,6 @@ std::ostream& operator<<(std::ostream &out, Message& m)
     out << "TIPO:"<< std::quoted(std::to_string(m.type));
     if(!m.data.empty()) out << " DATA:" << std::quoted(m.data.data());
     if(!m.hash.empty()) out << " HASH:" << std::quoted(m.hash);
-    out<<std::endl;
     return out;
 }
 
