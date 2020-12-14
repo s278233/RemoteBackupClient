@@ -50,47 +50,42 @@ class Message {
     void hashData();
 
 public:
-    //Costruttore di copia
-    Message(const Message& m);
-    //Costruttore di movimento
-    Message(Message &&src) noexcept;
-    //Overload operatore di assegnazione tramite copia
-    Message& operator= (const Message &m);
-    //Overload operatore di assegnazione tramite movimento
-    Message& operator=(Message&& src) noexcept ;
-    //Distruttore
-    virtual ~Message();
-    //Costruttore per messaggio vuoto
-    Message();
-    //Costruttore per messaggio senza dato
-    explicit Message(int type);
-    //Costruttore per dato generico
-    Message(int type, std::vector<char> data);
-    //Costruttore per coppia<username, password>
-    explicit Message(const std::pair<std::string, std::string>& authData);
-    //Costruttore per mappa <file/directory, hash>
-    explicit Message(const std::unordered_map<std::string, std::string>& paths);
+    Message(const Message& m);  //Costruttore di copia
+    Message(Message &&src) noexcept;    //Costruttore di movimento
+    Message& operator= (const Message &m);  //Overload operatore di assegnazione tramite copia
+    Message& operator=(Message&& src) noexcept ;    //Overload operatore di assegnazione tramite movimento
+    virtual ~Message(); //Distruttore
 
-    //SWAP
-    friend void swap(Message& src, Message& dst);
-    //ToString
-    friend std::ostream& operator<<(std::ostream &out, Message& m);
-    //Getter per il campo Type
-    [[nodiscard]] int getType() const;
-    //Getter per il campo data
-    [[nodiscard]] const std::vector<char> &getData() const;
-    //Funzione di supporto per gli archive di boost
-    template<class Archive> void serialize(Archive& ar, unsigned int version);
-    //Verifica integrità messaggio
-    bool checkHash();
-    //Estrazione pair<username, password> dal campo data
-    std::optional<std::pair<std::string, std::string>> extractAuthData();
-    //Estrazione mappa<file/directory, hash> dal campo data
-    std::optional<std::unordered_map<std::string, std::string>> extractFileList();
-    //Lettura sincrona del messaggio da boost_socket
-    void syncRead(const boost::weak_ptr<tcp::socket> &socket_wptr, void (*connectionHandler)());
-    //Scrittura sincrona del messaggio su boost_socket
-    void syncWrite(const boost::weak_ptr<tcp::socket> &socket_wptr, void(*connectionHandler)()) const;
+    Message();  //Costruttore per messaggio vuoto
+
+    explicit Message(int type); //Costruttore per messaggio senza dato
+
+    Message(int type, std::vector<char> data);  //Costruttore per dato generico
+
+    explicit Message(const std::pair<std::string, std::string>& authData);  //Costruttore per coppia<username, password>
+
+    explicit Message(const std::unordered_map<std::string, std::string>& paths);    //Costruttore per mappa <file/directory, hash>
+
+
+    friend void swap(Message& src, Message& dst);   //SWAP
+
+    friend std::ostream& operator<<(std::ostream &out, Message& m); //ToString
+
+    [[nodiscard]] int getType() const;  //Getter per il campo Type
+
+    [[nodiscard]] const std::vector<char> &getData() const; //Getter per il campo data
+
+    template<class Archive> void serialize(Archive& ar, unsigned int version);  //Funzione di supporto per gli archive di boost
+
+    bool checkHash();   //Verifica integrità messaggio
+
+    std::optional<std::pair<std::string, std::string>> extractAuthData();   //Estrazione pair<username, password> dal campo data
+
+    std::optional<std::unordered_map<std::string, std::string>> extractFileList();  //Estrazione mappa<file/directory, hash> dal campo data
+
+    void syncRead(const boost::weak_ptr<tcp::socket> &socket_wptr, void (*connectionHandler)());    //Lettura sincrona del messaggio da boost_socket
+
+    void syncWrite(const boost::weak_ptr<tcp::socket> &socket_wptr, void(*connectionHandler)()) const;  //Scrittura sincrona del messaggio su boost_socket
 
     friend class boost::serialization::access;
 };
