@@ -219,12 +219,6 @@ int main()
     auto password = std::string("experience");
     auto auth_data = std::pair<std::string, std::string>(username, password);
 
-    auto m = Message(auth_data);
-    auto a = m.extractAuthData();
-
-    std::cout<<m<<std::endl;
-    std::cout<<a->first<<std::endl;
-    std::cout<<a->second<<std::endl;
 
     //Dati di connessione
     auto src_ip = ip::address::from_string("127.0.0.1");
@@ -265,6 +259,8 @@ int main()
         std::cout<<e.what()<<std::endl;
     }
 
+    std::cout<<"Autenticazione riuscita"<<std::endl;
+
     //Connessione stabilita
     running.store(true);
 
@@ -274,6 +270,7 @@ int main()
     //Scambio lista file
     auto fileListW = fw.getPaths();
     message = Message(fileListW);
+    std::cout<<message<<std::endl;
     message.syncWrite(socket_wptr, errorConnectionHandler);
     message.syncRead(socket_wptr, errorConnectionHandler);
     auto fileListR = message.extractFileList();

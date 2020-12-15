@@ -78,7 +78,7 @@ public:
 
     template<class Archive> void serialize(Archive& ar, unsigned int version);  //Funzione di supporto per gli archive di boost
 
-    bool checkHash();   //Verifica integrità messaggio
+    std::optional<bool> checkHash();   //Verifica integrità messaggio
 
     std::optional<std::pair<std::string, std::string>> extractAuthData();   //Estrazione pair<username, password> dal campo data
 

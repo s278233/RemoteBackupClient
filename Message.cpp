@@ -77,6 +77,7 @@ Message::Message(const std::unordered_map<std::string, std::string>& fileList) {
 
     this->data = std::vector<char>(tmp.begin(), tmp.end());
 
+
     hashData();
 }
 
@@ -122,9 +123,9 @@ template<class Archive> void Message::serialize(Archive& ar, const unsigned int 
 };
 
 //Verifica integrità messaggio
-bool Message::checkHash() {
+std::optional<bool> Message::checkHash() {
 
-    if(this->data.empty() || this->hash.empty()) return false;
+    if(this->data.empty() || this->hash.empty()) return std::optional<bool>();
 
     Message tmp(INVALID, this->data);
 
@@ -258,6 +259,8 @@ void Message::syncWrite(const boost::weak_ptr<tcp::socket>& socket_wptr, void co
 
 //Riempimento del campo hash
 void Message::hashData(){
+
+    if(this->data.empty()) return;
 
     unsigned char tmp[SHA256_DIGEST_LENGTH];
 
