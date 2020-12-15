@@ -6,16 +6,17 @@
 #define REMOTEBACKUPCLIENT_MESSAGE_H
 
 //Tipi di messaggio
-#define INVALID -100
-#define FILE_ERR -2
-#define AUTH_ERR -1
-#define AUTH_REQ 0
-#define AUTH_RES 1
-#define AUTH_OK 2
-#define FILE_LIST 3
-#define FILE_START 4
-#define FILE_DATA 5
-#define FILE_END 6
+#define INVALID    -100
+#define FILE_ERR   -2
+#define AUTH_ERR   -1
+#define AUTH_REQ    0
+#define AUTH_RES    1
+#define AUTH_OK     2
+#define FILE_LIST   3
+#define DIR         4
+#define FILE_START  5
+#define FILE_DATA   6
+#define FILE_END    7
 
 //Delimitatori
 #define UDEL "/:USERNAME/"

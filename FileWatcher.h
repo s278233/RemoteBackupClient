@@ -18,15 +18,14 @@
 enum class FileStatus {created, modified, erased};
 
  class FileWatcher {
- private:
-     std::unordered_map<std::string, unsigned char*> paths_;
+     std::unordered_map<std::string, std::string> paths_;
      std::string path_to_watch;
      std::chrono::duration<int, std::milli> delay;
      std::atomic_bool& running_;
  public:
-    FileWatcher(const std::string& path_to_watch, std::chrono::duration<int, std::milli> delay, std::atomic_bool& running);
-    const std::unordered_map<std::string, unsigned char[32]> & getPaths() const;
-    void start(const std::function<void (std::string, FileStatus)> &action);
+     FileWatcher(const std::string& path_to_watch, std::chrono::duration<int, std::milli> delay, std::atomic_bool& running);
+     void start(const std::function<void (std::string, FileStatus)> &action);
+     const std::unordered_map<std::string, std::string> &getPaths() const;
  };
 
 

@@ -25,8 +25,6 @@ std::condition_variable upload_cv;
 
 std::atomic_bool running;
 
-std::vector<char> auth_data;
-
 std::list<Message> download_pool;
 
 std::list<std::pair<std::string,FileStatus>> upload_pool;
@@ -37,6 +35,17 @@ void errorConnectionHandler(){
     connection_cv.notify_one();//prova a riconnettersi
     std::unique_lock<std::mutex> lck(connection_mtx);
     connection_cv.wait(lck);
+}
+
+void checkDifferences(std::unordered_map<std::string, std::string>& src, std::unordered_map<std::string, std::string>& dst){
+    for(const auto& file:src)
+        if(!dst.contains(file.first) || (dst.contains(file.first) && file.second != dst[file.first])) {
+            upload_pool.push_front(std::pair(file.first, FileStatus::created));
+            upload_cv.notify_one();
+        } else if(file.second != dst[file.first]) {
+            upload_pool.push_front(std::pair(file.first, FileStatus::modified));
+            upload_cv.notify_one();
+        }
 }
 
 void FileWatcherThread(FileWatcher fw){
@@ -117,6 +126,8 @@ void FileDownloaderDispatcherThread(){
             message = download_pool.back();
             download_pool.pop_back();
 
+            if(message.getType() == DIR)
+
             if (message.getType() != FILE_START) {
                 std::cout << "Error File Download" << std::endl;
                 message = Message(FILE_ERR);
@@ -160,14 +171,13 @@ void FileDownloaderDispatcherThread(){
 
 }
 
-void ReceiverThread(){
+void ReceiverThread(const Message& authMessage){
     Message message;
-    Message error = Message(AUTH_RES, auth_data);
     try {
     while(running){
                 message.syncRead(socket_wptr, errorConnectionHandler);
         switch (message.getType()) {
-            case AUTH_REQ:  error.syncWrite(socket_wptr, errorConnectionHandler);
+            case AUTH_REQ:  authMessage.syncWrite(socket_wptr, errorConnectionHandler);
             break;
             case AUTH_ERR:  throw std::runtime_error("Wrong username/password!");
             break;
@@ -194,10 +204,10 @@ void signal_callback_handler(int signum) {
     //exit(signum);
 }
 
-int main(int argc, char* argv[])
+int main()
 {
     //Signal Handler(Chiusura con Ctrl+C)
-    signal(SIGINT, signal_callback_handler);
+//    signal(SIGINT, signal_callback_handler);
 
     std::cout<<"Ctrl+C to close the program..."<<std::endl;
 
@@ -207,8 +217,14 @@ int main(int argc, char* argv[])
     //Dati di autenticazione
     auto username = std::string("gold");
     auto password = std::string("experience");
-    auto auth_string = std::string("/USERNAME/:"+username+"/PASSWORD/:"+password);
-    auth_data = std::vector<char>(auth_string.begin(), auth_string.end());
+    auto auth_data = std::pair<std::string, std::string>(username, password);
+
+    auto m = Message(auth_data);
+    auto a = m.extractAuthData();
+
+    std::cout<<m<<std::endl;
+    std::cout<<a->first<<std::endl;
+    std::cout<<a->second<<std::endl;
 
     //Dati di connessione
     auto src_ip = ip::address::from_string("127.0.0.1");
@@ -239,8 +255,8 @@ int main(int argc, char* argv[])
         if (message.getType() != AUTH_REQ) throw std::runtime_error("Handshake Error!");
 
         //RES
-        message = Message(AUTH_RES, auth_data);
-        message.syncWrite(socket_wptr, errorConnectionHandler);
+        auto authMessage = Message(auth_data);
+        authMessage.syncWrite(socket_wptr, errorConnectionHandler);
 
         //OK
         message.syncRead(socket_wptr, errorConnectionHandler);
@@ -256,14 +272,21 @@ int main(int argc, char* argv[])
     FileWatcher fw{"../"+username, std::chrono::milliseconds(5000), running};//5 sec of delay
 
     //Scambio lista file
-    //message = Message(5, fw.getPaths());
+    auto fileListW = fw.getPaths();
+    message = Message(fileListW);
+    message.syncWrite(socket_wptr, errorConnectionHandler);
+    message.syncRead(socket_wptr, errorConnectionHandler);
+    auto fileListR = message.extractFileList();
+
+    //Processo differenza tra le fileList
+    checkDifferences(fileListW, fileListR.value());
 
     //Avvio il thread che gestisce il FileWatcher
     std::thread fwt(FileWatcherThread, fw);
     fwt.detach();
 
     //Avvio il thread che gestisce i messaggi in entrata
-    std::thread rt(ReceiverThread);
+    std::thread rt(ReceiverThread, Message(auth_data));
     rt.detach();
 
     //Avvio il thread che gestische i download dei file
@@ -291,5 +314,4 @@ int main(int argc, char* argv[])
         }
     }
     return 0;
-    //return EXIT_SUCCESS;
 }
