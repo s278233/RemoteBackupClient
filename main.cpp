@@ -126,43 +126,44 @@ void FileDownloaderDispatcherThread(){
             message = download_pool.back();
             download_pool.pop_back();
 
-            if(message.getType() == DIR)
+            std::string path(message.getData().begin(), message.getData().end());
 
-            if (message.getType() != FILE_START) {
+            if(message.getType() == DIR) std::filesystem::create_directory(path);
+
+            else if (message.getType() != FILE_START) {
                 std::cout << "Error File Download" << std::endl;
                 message = Message(FILE_ERR);
                 message.syncWrite(socket_wptr, errorConnectionHandler);
-            }
 
-            std::string path(message.getData().begin(), message.getData().end());
+            } else {
+                path_ignore_pool.push_front(path);
 
-            path_ignore_pool.push_front(path);
+                ofs.open(path, std::ios::binary);
 
-            ofs.open(path, std::ios::binary);
+                while (true) {
+                    download_cv.wait(lck);
 
-            while (true) {
-                download_cv.wait(lck);
+                    ofs.open(path, std::ios::binary | std::ios_base::app);
+                    message = download_pool.back();
 
-                ofs.open(path, std::ios::binary | std::ios_base::app);
-                message = download_pool.back();
+                    download_pool.pop_back();
 
-                download_pool.pop_back();
+                    if (message.getType() == FILE_END) {
+                        ofs.close();
+                        path_ignore_pool.pop_back();
+                        break;
+                    }
 
-                if (message.getType() == FILE_END) {
-                    ofs.close();
-                    path_ignore_pool.pop_back();
-                    break;
+                    if (message.getType() != FILE_DATA || !message.checkHash()) {
+                        std::cout << "Error File Download" << std::endl;
+                        message = Message(FILE_ERR);
+                        message.syncWrite(socket_wptr, errorConnectionHandler);
+                        break;
+                    }
+
+                    ofs << message.getData();
+
                 }
-
-                if (message.getType() != FILE_DATA || !message.checkHash()) {
-                    std::cout << "Error File Download" << std::endl;
-                    message = Message(FILE_ERR);
-                    message.syncWrite(socket_wptr, errorConnectionHandler);
-                    break;
-                }
-
-                ofs << message.getData();
-
             }
         }
     } catch (const std::runtime_error& e) {
@@ -175,8 +176,15 @@ void ReceiverThread(const Message& authMessage){
     Message message;
     try {
     while(running){
+                //Ricezione messaggio
                 message.syncRead(socket_wptr, errorConnectionHandler);
-        switch (message.getType()) {
+                //Controllo integrità
+                if((message.checkHash().has_value() && !message.checkHash().value()) ||
+                !message.getData().empty() && !message.checkHash().has_value()) {
+                    std::cout<<"Wrong Hash!, message discarded"<<std::endl;
+                } else
+            //Smistamento messaggio
+            switch (message.getType()) {
             case AUTH_REQ:  authMessage.syncWrite(socket_wptr, errorConnectionHandler);
             break;
             case AUTH_ERR:  throw std::runtime_error("Wrong username/password!");
@@ -209,7 +217,7 @@ int main()
     //Signal Handler(Chiusura con Ctrl+C)
 //    signal(SIGINT, signal_callback_handler);
 
-    std::cout<<"Ctrl+C to close the program..."<<std::endl;
+    std::cout<<"Ctrl+C to close the program..."<<std::endl; //Funzionalità non ancora implementata
 
     boost::system::error_code ec;
     Message message;
@@ -240,7 +248,16 @@ int main()
     socket_->connect(tcp::endpoint(dst_ip,dst_port), ec);
     if(ec) throw std::runtime_error("Can't connect to remote server!");
 
-    //Autenticazione(three-way)
+    //Inizializzo il filewatcher (viene effettuato un primo controllo all'avvio sui file)
+    FileWatcher fw{"../"+username, std::chrono::milliseconds(5000), running};//5 sec of delay
+
+    //Inizializzo fileList da inviare
+    auto fileListW = fw.getPaths();
+    auto fileListMessage = Message(fileListW);
+    std::optional<std::unordered_map<std::basic_string<char>, std::basic_string<char>>> fileListR;
+    std::cout<<message<<std::endl;
+
+    //Autenticazione(two-way)
 
     try {
 
@@ -252,31 +269,20 @@ int main()
         auto authMessage = Message(auth_data);
         authMessage.syncWrite(socket_wptr, errorConnectionHandler);
 
-        //OK
+        //Scambio lista file
+        fileListMessage.syncWrite(socket_wptr, errorConnectionHandler);
         message.syncRead(socket_wptr, errorConnectionHandler);
-        if (message.getType() != AUTH_OK) throw std::runtime_error("Handshake Error!");
+        fileListR = message.extractFileList();
+
     } catch (const std::runtime_error& e) {
         std::cout<<e.what()<<std::endl;
+        throw std::runtime_error("Handshake Error!");
     }
 
     std::cout<<"Autenticazione riuscita"<<std::endl;
 
     //Connessione stabilita
     running.store(true);
-
-    //Inizializzo il filewatcher (viene effettuato un primo controllo all'avvio sui file)
-    FileWatcher fw{"../"+username, std::chrono::milliseconds(5000), running};//5 sec of delay
-
-    //Scambio lista file
-    auto fileListW = fw.getPaths();
-    message = Message(fileListW);
-    std::cout<<message<<std::endl;
-    message.syncWrite(socket_wptr, errorConnectionHandler);
-    message.syncRead(socket_wptr, errorConnectionHandler);
-    auto fileListR = message.extractFileList();
-
-    //Processo differenza tra le fileList
-    checkDifferences(fileListW, fileListR.value());
 
     //Avvio il thread che gestisce il FileWatcher
     std::thread fwt(FileWatcherThread, fw);
@@ -293,6 +299,10 @@ int main()
     //Avvio il thread che gestice l'upload dei file
     std::thread fut(FileUploaderDispatcherThread);
     fut.detach();
+
+    //Processo differenze tra le fileList
+    checkDifferences(fileListW, fileListR.value());
+
 
     //Gestisco possibili connection lost
     while(running) {

@@ -120,7 +120,7 @@ template<class Archive> void Message::serialize(Archive& ar, const unsigned int 
     ar & type;      //Se Archive è un output archive allora & è uguale a <<
     ar & data;      //Se Archive è un input  archive allora & è uguale a >>
     ar & hash;
-};
+}
 
 //Verifica integrità messaggio
 std::optional<bool> Message::checkHash() {
@@ -140,7 +140,7 @@ std::optional<std::pair<std::string, std::string>> Message::extractAuthData(){
 
     std::string codedAuthData(this->data.begin(), this->data.end());
 
-    size_t pos = 0;
+    size_t pos;
     std::string username;
     std::string password;
 
@@ -165,7 +165,7 @@ std::optional<std::unordered_map<std::string, std::string>> Message::extractFile
     std::unordered_map<std::string, std::string> decodedFileList;
     std::string codedFileList(this->data.begin(), this->data.end());
 
-    size_t pos = 0;
+    size_t pos;
     std::string file;
     std::string hash_;
     while ((pos = codedFileList.find(FDEL)) != std::string::npos) {
@@ -195,7 +195,7 @@ void Message::syncRead(const boost::weak_ptr<tcp::socket>& socket_wptr, void con
 
     //Ricezione Header
     sizeR = boost::asio::read((*socket_wptr.lock()), boost::asio::buffer(header), boost::asio::transfer_exactly(HEADER_LENGTH), ec);
-    if(ec != 0) {
+    if(ec) {
         if ((ec == boost::asio::error::eof) || (ec == boost::asio::error::connection_reset)) connectionHandler();
         else throw std::runtime_error(ec.message());
     }
@@ -209,7 +209,7 @@ void Message::syncRead(const boost::weak_ptr<tcp::socket>& socket_wptr, void con
     //Ricezione Messaggio
     std::vector<char> message(message_length);
     sizeR = boost::asio::read((*socket_wptr.lock()), boost::asio::buffer(message), boost::asio::transfer_exactly(message_length), ec);
-    if(ec != 0) {
+    if(ec) {
         if ((ec == boost::asio::error::eof) || (ec == boost::asio::error::connection_reset)) connectionHandler();
         else throw std::runtime_error(ec.message());
     }
@@ -246,7 +246,7 @@ void Message::syncWrite(const boost::weak_ptr<tcp::socket>& socket_wptr, void co
     buffers.emplace_back(boost::asio::buffer(outbound_data_));
     sizeW = boost::asio::write((*socket_wptr.lock()), buffers, boost::asio::transfer_exactly(buffers[0].size() + buffers[1].size()), ec);
 
-    if(ec != 0) {
+    if(ec) {
         if ((ec == boost::asio::error::eof) || (ec == boost::asio::error::connection_reset)) connectionHandler();
         else throw std::runtime_error(ec.message());
     }
