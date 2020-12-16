@@ -20,3 +20,6 @@ if(CMAKE_SYSTEM_NAME STREQUAL Linux OR CMAKE_SYSTEM_NAME STREQUAL Darwin)
 else()
     target_link_libraries(RemoteBackupClient ${Boost_LIBRARIES} crypto)
 endif()
+
+#If "file does not belong to any project" warning appears just do:
+#File -> Invalidate Caches/Restart -> Invalidate And Restart.
