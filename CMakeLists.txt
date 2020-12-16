@@ -5,10 +5,18 @@ set(CMAKE_CXX_STANDARD 20)
 
 add_executable(RemoteBackupClient main.cpp Message.cpp Message.h FileWatcher.cpp FileWatcher.h)
 
+if(CMAKE_SYSTEM_NAME STREQUAL Linux OR CMAKE_SYSTEM_NAME STREQUAL Darwin)
+    set(THREADS_PREFER_PTHREAD_FLAG ON)
+    find_package(Threads REQUIRED)
+endif ()
+
 # see https://cmake.org/cmake/help/latest/module/FindBoost.html
 find_package(Boost 1.6.0 REQUIRED COMPONENTS filesystem serialization)
-find_package(Openssl)
 
 include_directories(${Boost_INCLUDE_DIR})
 # Note: a target should be already defined using 'add_executable' or 'add_library'
-target_link_libraries(RemoteBackupClient ${Boost_LIBRARIES} crypto)
+if(CMAKE_SYSTEM_NAME STREQUAL Linux OR CMAKE_SYSTEM_NAME STREQUAL Darwin)
+    target_link_libraries(RemoteBackupClient PRIVATE Threads::Threads ${Boost_LIBRARIES} crypto)
+else()
+    target_link_libraries(RemoteBackupClient ${Boost_LIBRARIES} crypto)
+endif()

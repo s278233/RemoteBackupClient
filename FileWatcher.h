@@ -12,6 +12,7 @@
 #include <string>
 #include <functional>
 #include <openssl/sha.h>
+#include <atomic>
 
 
 // Define available file changes
