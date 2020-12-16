@@ -248,8 +248,12 @@ int main()
     socket_->connect(tcp::endpoint(dst_ip,dst_port), ec);
     if(ec) throw std::runtime_error("Can't connect to remote server!");
 
+    std::cout<<"FileWatcher inizializzazione..."<<std::endl;
+
     //Inizializzo il filewatcher (viene effettuato un primo controllo all'avvio sui file)
-    FileWatcher fw{"../"+username, std::chrono::milliseconds(5000), running};//5 sec of delay
+    FileWatcher fw{"./../"+username, std::chrono::milliseconds(5000), running};//5 sec of delay
+
+    std::cout<<"FileWatcher inizializzato"<<std::endl;
 
     //Inizializzo fileList da inviare
     auto fileListW = fw.getPaths();
@@ -302,6 +306,8 @@ int main()
 
     //Processo differenze tra le fileList
     checkDifferences(fileListW, fileListR.value());
+
+    std::cout<<"Processando le differenze..."<<std::endl;
 
 
     //Gestisco possibili connection lost
