@@ -18,7 +18,7 @@ std::string fileHash(const std::string& file){
 
 
     ifs.open(file, std::ios::binary);
-    while(!ifs.eof()) {    std::cout<<"here2"<<std::endl;
+    while(!ifs.eof()) {
 
         ifs.read(buffer.data(), CHUNK_SIZE);
     size_t size= ifs.gcount();
@@ -79,14 +79,14 @@ void FileWatcher::start(const std::function<void (std::string, FileStatus)> &act
                                action(file.path().string(), FileStatus::created);
                            }
                            // File modification
-
-                                   recomputedHash = fileHash(file.path().string());
-                                   if (paths_[file.path().string()] != recomputedHash) {
-                                       paths_[file.path().string()] = recomputedHash;
-                                       recomputedHash = "";
-                                       action(file.path().string(), FileStatus::modified);
-                                   }
-
+                           if(!std::filesystem::is_directory(file.path().string())) {
+                               recomputedHash = fileHash(file.path().string());
+                               if (paths_[file.path().string()] != recomputedHash) {
+                                   paths_[file.path().string()] = recomputedHash;
+                                   recomputedHash = "";
+                                   action(file.path().string(), FileStatus::modified);
+                               }
+                           }
                                 }
                          }
                }
