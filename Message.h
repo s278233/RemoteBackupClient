@@ -48,6 +48,9 @@ class Message {
     std::vector<char> data{};
     std::string hash;
 
+    static std::mutex asyncR_mtx;
+    static std::mutex asyncW_mtx;
+
     void hashData();
 
 public:
@@ -84,9 +87,9 @@ public:
 
     std::optional<std::unordered_map<std::string, std::string>> extractFileList();  //Estrazione mappa<file/directory, hash> dal campo data
 
-    void syncRead(const boost::weak_ptr<tcp::socket> &socket_wptr, void (*connectionHandler)());    //Lettura sincrona del messaggio da boost_socket
+    void syncRead(const boost::weak_ptr<tcp::socket> &socket_wptr);    //Lettura sincrona del messaggio da boost_socket
 
-    void syncWrite(const boost::weak_ptr<tcp::socket> &socket_wptr, void(*connectionHandler)()) const;  //Scrittura sincrona del messaggio su boost_socket
+    void syncWrite(const boost::weak_ptr<tcp::socket> &socket_wptr) const;  //Scrittura sincrona del messaggio su boost_socket
 
     friend class boost::serialization::access;
 };

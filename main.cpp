@@ -3,6 +3,7 @@
 #include <csignal>
 #include "Message.h"
 #include "FileWatcher.h"
+#include "SafeCout.h"
 
 #define RECONN_DELAY 5
 
@@ -14,8 +15,8 @@ using namespace boost::asio;
 using namespace boost::asio::ip;
 
 boost::weak_ptr<tcp::socket> socket_wptr;
-std::mutex connection_mtx;
-std::condition_variable connection_cv;
+std::mutex reconnection_mtx;
+std::condition_variable reconnection_cv;
 
 std::mutex download_mtx;
 std::condition_variable download_cv;
@@ -31,18 +32,16 @@ std::list<std::pair<std::string,FileStatus>> upload_pool;
 
 std::list<std::string> path_ignore_pool;
 
-void errorConnectionHandler(){
-    connection_cv.notify_one();//prova a riconnettersi
-    std::unique_lock<std::mutex> lck(connection_mtx);
-    connection_cv.wait(lck);
-}
+
 
 void checkDifferences(std::unordered_map<std::string, std::string>& src, std::unordered_map<std::string, std::string>& dst){
     for(const auto& file:src)
         if(!dst.contains(file.first) || (dst.contains(file.first) && file.second != dst[file.first])) {
+            std::lock_guard<std::mutex> lg(upload_mtx);
             upload_pool.push_front(std::pair(file.first, FileStatus::created));
             upload_cv.notify_one();
         } else if(file.second != dst[file.first]) {
+            std::lock_guard<std::mutex> lg(upload_mtx);
             upload_pool.push_front(std::pair(file.first, FileStatus::modified));
             upload_cv.notify_one();
         }
@@ -50,7 +49,12 @@ void checkDifferences(std::unordered_map<std::string, std::string>& src, std::un
 
 void FileWatcherThread(FileWatcher fw){
 
+    while(!running.load());
+
+    SafeCout::safe_cout("Thread avviato");
+
     fw.start([] (const std::string& path_to_watch, FileStatus status) -> void {
+        if(!running.load()) return;
         //Processo solo i file che non sono in download
         if(!std::filesystem::is_regular_file(std::filesystem::path(path_to_watch)) && status != FileStatus::erased
         && (!(std::find(path_ignore_pool.begin(), path_ignore_pool.end(), path_to_watch) != path_ignore_pool.end())
@@ -60,22 +64,22 @@ void FileWatcherThread(FileWatcher fw){
 
         switch(status) {
             case FileStatus::created:
-                std::cout << "File created: " << path_to_watch << '\n';
+                SafeCout::safe_cout("File created: ", path_to_watch);
                 upload_pool.push_front(std::pair(path_to_watch, FileStatus::created));
                 upload_cv.notify_one();
                 break;
             case FileStatus::modified:
-                std::cout << "File modified: " << path_to_watch << '\n';
+                SafeCout::safe_cout("File modified: ", path_to_watch);
                 upload_pool.push_front(std::pair(path_to_watch, FileStatus::modified));
                 upload_cv.notify_one();
                 break;
             case FileStatus::erased:
-                std::cout << "File erased: " << path_to_watch << '\n';
+                SafeCout::safe_cout("File erased: ", path_to_watch);
                 upload_pool.push_front(std::pair(path_to_watch, FileStatus::erased));
                 upload_cv.notify_one();
                 break;
             default:
-                std::cout << "Error! Unknown file status.\n";
+                SafeCout::safe_cout("Error! Unknown file status.");
         }
     });
 }
@@ -88,29 +92,45 @@ void FileUploaderDispatcherThread(){
     Message message;
     std::string file;
 
-    try{
-    while(running){
-        upload_cv.wait(lck);
-        file = upload_pool.back().first;
-        ifs.open(file, std::ios::binary);
-        message = Message(FILE_START, std::vector<char>(file.begin(), file.end()));
-        message.syncWrite(socket_wptr, errorConnectionHandler);
-        while(!ifs.eof()) {
-            ifs.read(buffer.data(), buffer.size());
-            size = ifs.gcount();
-            if(size < CHUNK_SIZE)
-                buffer.resize(size);
-            message = Message(FILE_DATA, buffer);
-            message.syncWrite(socket_wptr, errorConnectionHandler);
-            buffer.clear();
+    while(!running.load());
+
+    SafeCout::safe_cout("FileUploader Thread avviato ");
+
+    try {
+        while (running.load()) {
+            upload_cv.wait(lck);
+            if (!running.load()) return;
+            file = upload_pool.back().first;
+
+            SafeCout::safe_cout("uploading ", file);
+
+
+            ifs.open(file, std::ios::binary);
+            message = Message(FILE_START, std::vector<char>(file.begin(), file.end()));
+            message.syncWrite(socket_wptr);
+            while (!ifs.eof()) {
+                ifs.read(buffer.data(), buffer.size());
+                size = ifs.gcount();
+                if (size < CHUNK_SIZE)
+                    buffer.resize(size);
+                message = Message(FILE_DATA, buffer);
+                message.syncWrite(socket_wptr);
+                buffer.clear();
+            }
+            ifs.close();
+            message = Message(FILE_END);
+            message.syncWrite(socket_wptr);
         }
-        ifs.close();
-        message = Message(FILE_END);
-        message.syncWrite(socket_wptr, errorConnectionHandler);
+        SafeCout::safe_cout("FileUploader Thread terminato");
+    }catch (boost::system::system_error const &e) {SafeCout::safe_cout("scemo");
+        SafeCout::safe_cout("FileUploader exception: ", e.what());
+        if(!running.load()) return;
+        if ((e.code() == boost::asio::error::eof) || (e.code() == boost::asio::error::connection_reset))
+            reconnection_cv.notify_one();
+    } catch (const std::runtime_error &e) {
+        SafeCout::safe_cout("FileUploader exception: ", e.what());
     }
-    } catch (const std::runtime_error& e) {
-        std::cout<<e.what()<<std::endl;
-    }
+
 }
 
 void FileDownloaderDispatcherThread(){
@@ -118,22 +138,29 @@ void FileDownloaderDispatcherThread(){
     std::ofstream ofs;
     std::unique_lock<std::mutex> lck(download_mtx);
 
+    while(!running.load());
+
+    SafeCout::safe_cout("FileDownloader Thread avviato ");
+
     try {
 
-        while (running) {
+        while (running.load()) {
             download_cv.wait(lck);
+            if(!running.load()) return;
 
             message = download_pool.back();
             download_pool.pop_back();
 
             std::string path(message.getData().begin(), message.getData().end());
 
+            SafeCout::safe_cout("downloading ", path);
+
             if(message.getType() == DIR) std::filesystem::create_directory(path);
 
             else if (message.getType() != FILE_START) {
-                std::cout << "Error File Download" << std::endl;
+                SafeCout::safe_cout("Error File Download");
                 message = Message(FILE_ERR);
-                message.syncWrite(socket_wptr, errorConnectionHandler);
+                message.syncWrite(socket_wptr);
 
             } else {
                 path_ignore_pool.push_front(path);
@@ -154,10 +181,10 @@ void FileDownloaderDispatcherThread(){
                         break;
                     }
 
-                    if (message.getType() != FILE_DATA || !message.checkHash()) {
-                        std::cout << "Error File Download" << std::endl;
+                    if (message.getType() != FILE_DATA) {
+                        SafeCout::safe_cout("Error File Download");
                         message = Message(FILE_ERR);
-                        message.syncWrite(socket_wptr, errorConnectionHandler);
+                        message.syncWrite(socket_wptr);
                         break;
                     }
 
@@ -166,29 +193,41 @@ void FileDownloaderDispatcherThread(){
                 }
             }
         }
-    } catch (const std::runtime_error& e) {
-        std::cout<<e.what()<<std::endl;
+        SafeCout::safe_cout("FileDownloader Thread terminato");
+    } catch (boost::system::system_error const &e) {
+        SafeCout::safe_cout("FileDownloader exception: ", e.what());
+    if(!running.load()) return;
+    if ((e.code() == boost::asio::error::eof) || (e.code() == boost::asio::error::connection_reset))
+        reconnection_cv.notify_one();
+    }catch (const std::runtime_error &e) {
+        SafeCout::safe_cout("FileDownloader exception: ", e.what());
     }
+
 
 }
 
-void ReceiverThread(const Message& authMessage){
+void ReceiverThread(){
     Message message;
+
+    while(!running.load());
+
+    SafeCout::safe_cout("Receiver Thread avviato");
+
     try {
-    while(running){
+    while(running.load()){
                 //Ricezione messaggio
-                message.syncRead(socket_wptr, errorConnectionHandler);
+                message.syncRead(socket_wptr);
+                //Controllo tipo
+                if(message.getType()<-2 || message.getType()>7)
+                    SafeCout::safe_cout("Wrong Type!, message discarded");
                 //Controllo integrità
-                if((message.checkHash().has_value() && !message.checkHash().value()) ||
+                else if((message.checkHash().has_value() && !message.checkHash().value()) ||
                 !message.getData().empty() && !message.checkHash().has_value()) {
-                    std::cout<<"Wrong Hash!, message discarded"<<std::endl;
+                    SafeCout::safe_cout("Wrong Hash!, message discarded");
                 } else
             //Smistamento messaggio
             switch (message.getType()) {
-            case AUTH_REQ:  authMessage.syncWrite(socket_wptr, errorConnectionHandler);
-            break;
-            case AUTH_ERR:  throw std::runtime_error("Wrong username/password!");
-            break;
+            case DIR:
             case FILE_START:
             case FILE_DATA:
             case FILE_END:
@@ -196,17 +235,24 @@ void ReceiverThread(const Message& authMessage){
                 download_pool.push_front(message);
                 download_cv.notify_one();
             break;
-            default: std::cout<<"Message type not recognized!"<<std::endl;
+            default: SafeCout::safe_cout("Message type not recognized!");
             break;
         }
     }
-    } catch (const std::runtime_error& e) {
-        std::cout<<e.what()<<std::endl;
+        SafeCout::safe_cout("Receiver Thread terminato");
+    } catch (boost::system::system_error const &e) {
+        SafeCout::safe_cout("Receiver exception: ", e.what());
+        if(!running.load()) return;
+        if ((e.code() == boost::asio::error::eof) || (e.code() == boost::asio::error::connection_reset))
+            reconnection_cv.notify_one();
+    }catch (const std::runtime_error &e) {
+        SafeCout::safe_cout("Receiver exception: ", e.what());
     }
+
 }
 
 void signal_callback_handler(int signum) {
-    std::cout << "Caught signal " << signum << std::endl;
+    SafeCout::safe_cout("Caught signal ", signum);
     // Terminate program
     running.store(false);
     //exit(signum);
@@ -217,7 +263,7 @@ int main()
     //Signal Handler(Chiusura con Ctrl+C)
 //    signal(SIGINT, signal_callback_handler);
 
-    std::cout<<"Ctrl+C to close the program..."<<std::endl; //Funzionalità non ancora implementata
+    SafeCout::safe_cout("Ctrl+C to close the program..."); //Funzionalità non ancora implementata
 
     boost::system::error_code ec;
     Message message;
@@ -230,7 +276,7 @@ int main()
 
     //Dati di connessione
     auto src_ip = ip::address::from_string("127.0.0.1");
-    int src_port = 6000;
+    int src_port = 6003;
     auto dst_ip = ip::address::from_string("127.0.0.1");
     int dst_port = 5000;
 
@@ -248,82 +294,99 @@ int main()
     socket_->connect(tcp::endpoint(dst_ip,dst_port), ec);
     if(ec) throw std::runtime_error("Can't connect to remote server!");
 
-    std::cout<<"FileWatcher inizializzazione..."<<std::endl;
 
-    //Inizializzo il filewatcher (viene effettuato un primo controllo all'avvio sui file)
-    FileWatcher fw{"./../"+username, std::chrono::milliseconds(5000), running};//5 sec of delay
+    SafeCout::safe_cout("FileWatcher inizializzazione...");
 
-    std::cout<<"FileWatcher inizializzato"<<std::endl;
+        //Inizializzo il filewatcher (viene effettuato un primo controllo all'avvio sui file)
+        FileWatcher fw{"./../" + username, std::chrono::milliseconds(5000), running};//5 sec of delay
 
-    //Inizializzo fileList da inviare
-    auto fileListW = fw.getPaths();
-    auto fileListMessage = Message(fileListW);
-    std::optional<std::unordered_map<std::basic_string<char>, std::basic_string<char>>> fileListR;
-    std::cout<<message<<std::endl;
+    SafeCout::safe_cout("FileWatcher inizializzato");
 
-    //Autenticazione(two-way)
+        //Inizializzo fileList da inviare
+        auto fileListW = fw.getPaths();
+        auto fileListMessage = Message(fileListW);
+        std::optional<std::unordered_map<std::basic_string<char>, std::basic_string<char>>> fileListR;
 
-    try {
+        while(true) {
+        //Autenticazione(two-way)
 
-        //REQ
-        message.syncRead(socket_wptr, errorConnectionHandler);
-        if (message.getType() != AUTH_REQ) throw std::runtime_error("Handshake Error!");
+            SafeCout::safe_cout("Autenticazione");
 
-        //RES
-        auto authMessage = Message(auth_data);
-        authMessage.syncWrite(socket_wptr, errorConnectionHandler);
+        try {
 
-        //Scambio lista file
-        fileListMessage.syncWrite(socket_wptr, errorConnectionHandler);
-        message.syncRead(socket_wptr, errorConnectionHandler);
-        fileListR = message.extractFileList();
+            //REQ
+            message.syncRead(socket_wptr);
+            if (message.getType() != AUTH_REQ) throw std::runtime_error("Handshake Error!");
 
-    } catch (const std::runtime_error& e) {
-        std::cout<<e.what()<<std::endl;
-        throw std::runtime_error("Handshake Error!");
-    }
+            //RES
+            auto authMessage = Message(auth_data);
+            authMessage.syncWrite(socket_wptr);
 
-    std::cout<<"Autenticazione riuscita"<<std::endl;
+            //Scambio lista file
+            fileListMessage.syncWrite(socket_wptr);
+            message.syncRead(socket_wptr);
+            fileListR = message.extractFileList();
 
-    //Connessione stabilita
-    running.store(true);
+        } catch (boost::system::system_error const &e) {
+            SafeCout::safe_cout(e.what());
+            throw std::runtime_error("Handshake Error!");
 
-    //Avvio il thread che gestisce il FileWatcher
-    std::thread fwt(FileWatcherThread, fw);
-    fwt.detach();
-
-    //Avvio il thread che gestisce i messaggi in entrata
-    std::thread rt(ReceiverThread, Message(auth_data));
-    rt.detach();
-
-    //Avvio il thread che gestische i download dei file
-    std::thread fdt(FileDownloaderDispatcherThread);
-    fdt.detach();
-
-    //Avvio il thread che gestice l'upload dei file
-    std::thread fut(FileUploaderDispatcherThread);
-    fut.detach();
-
-    //Processo differenze tra le fileList
-    checkDifferences(fileListW, fileListR.value());
-
-    std::cout<<"Processando le differenze..."<<std::endl;
+        } catch (const std::runtime_error &e) {
+            SafeCout::safe_cout(e.what());
+            throw std::runtime_error("Handshake Error!");
+        }
 
 
-    //Gestisco possibili connection lost
-    while(running) {
-        std::unique_lock<std::mutex> lck(connection_mtx);
-        connection_cv.wait(lck);
-        while(running) {
-            //Reconnection
-            socket_.reset(new boost::asio::ip::tcp::socket(ioc));
-            socket_->connect(tcp::endpoint(dst_ip, dst_port), ec);
-            if (!ec) {
-                connection_cv.notify_one();
-                break;
+            SafeCout::safe_cout("Autenticazione riuscita");
+
+        //Inizializzo il thread che gestisce il FileWatcher
+        std::thread fwt(FileWatcherThread, fw);
+        fwt.detach();
+
+        //Inizializzo il thread che gestisce i messaggi in entrata
+        std::thread rt(ReceiverThread);
+        rt.detach();
+
+        //Inizializzo il thread che gestische i download dei file
+        std::thread fdt(FileDownloaderDispatcherThread);
+        fdt.detach();
+
+        //Inizializzo il thread che gestice l'upload dei file
+        std::thread fut(FileUploaderDispatcherThread);
+        fut.detach();
+
+        //Avvio tutti i thread
+        running.store(true);
+
+            SafeCout::safe_cout("Processando le differenze...");
+
+        //Processo differenze tra le fileList
+        checkDifferences(fileListW, fileListR.value());
+
+        //Gestisco possibili connection lost
+        while (running.load()) {
+            std::unique_lock<std::mutex> lck(reconnection_mtx);
+            reconnection_cv.wait(lck);
+            SafeCout::safe_cout("Connection lost, trying to reconnect...");
+
+            running.store(false);
+
+            download_cv.notify_all();
+            upload_cv.notify_all();
+            while (!running.load()) {
+                //Reconnection
+                socket_.reset(new boost::asio::ip::tcp::socket(ioc));
+                socket_->connect(tcp::endpoint(dst_ip, dst_port), ec);
+                if (!ec) {
+                    SafeCout::safe_cout("Riconnessione riuscita!");
+                    socket_wptr = boost::weak_ptr<tcp::socket>(socket_);
+                    break;
+                }
+                std::this_thread::sleep_for(std::chrono::seconds(RECONN_DELAY));
             }
-            std::cout<<"Trying to reconnect..."<<std::endl;
-            std::this_thread::sleep_for(std::chrono::seconds(RECONN_DELAY));
+            download_pool.clear();
+            upload_pool.clear();
+            break;
         }
     }
     return 0;

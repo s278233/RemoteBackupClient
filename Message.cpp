@@ -7,6 +7,9 @@
 #include <sstream>
 #include <iomanip>
 
+std::mutex Message::asyncR_mtx;
+std::mutex Message::asyncW_mtx;
+
 //COSTRUTTORI, OVERLOADS E DISTRUTTORE
 
 //Costruttore di copia
@@ -125,6 +128,8 @@ template<class Archive> void Message::serialize(Archive& ar, const unsigned int 
 //Verifica integrità messaggio
 std::optional<bool> Message::checkHash() {
 
+    if(this->type <-2 || this->type>7) return std::optional<bool>();
+
     if(this->data.empty() || this->hash.empty()) return std::optional<bool>();
 
     Message tmp(INVALID, this->data);
@@ -186,21 +191,21 @@ std::optional<std::unordered_map<std::string, std::string>> Message::extractFile
 }
 
 //Lettura sincrona del messaggio da boost_socket
-void Message::syncRead(const boost::weak_ptr<tcp::socket>& socket_wptr, void connectionHandler()){
+void Message::syncRead(const boost::weak_ptr<tcp::socket>& socket_wptr){
+
+    std::lock_guard<std::mutex> lg(asyncR_mtx);
+
+    boost::system::error_code ec;
 
     std::vector<char> header(HEADER_LENGTH);
     size_t message_length;
     size_t sizeR;
-    boost::system::error_code ec;
 
     //Ricezione Header
-    sizeR = boost::asio::read((*socket_wptr.lock()), boost::asio::buffer(header), boost::asio::transfer_exactly(HEADER_LENGTH), ec);
-    if(ec) {
-        if ((ec == boost::asio::error::eof) || (ec == boost::asio::error::connection_reset)) connectionHandler();
-        else throw std::runtime_error(ec.message());
-    }
+    sizeR = boost::asio::read((*socket_wptr.lock()), boost::asio::buffer(header), boost::asio::transfer_exactly(HEADER_LENGTH));
 
-    if(sizeR != header.size()) throw std::runtime_error("Broken Header");
+    if(header.empty() || (!header.empty() && sizeR != header.size()))
+        throw std::runtime_error("Broken Header");
 
     //Deserializzazione Header
     std::istringstream header_stream(std::string(header.begin(),header.end()));
@@ -208,13 +213,10 @@ void Message::syncRead(const boost::weak_ptr<tcp::socket>& socket_wptr, void con
 
     //Ricezione Messaggio
     std::vector<char> message(message_length);
-    sizeR = boost::asio::read((*socket_wptr.lock()), boost::asio::buffer(message), boost::asio::transfer_exactly(message_length), ec);
-    if(ec) {
-        if ((ec == boost::asio::error::eof) || (ec == boost::asio::error::connection_reset)) connectionHandler();
-        else throw std::runtime_error(ec.message());
-    }
+    sizeR = boost::asio::read((*socket_wptr.lock()), boost::asio::buffer(message), boost::asio::transfer_exactly(message_length));
 
-    if(sizeR != message_length) throw std::runtime_error("Broken Message");
+    if(sizeR != message_length)
+        throw std::runtime_error("Broken Message");
 
     //Deserializzazione Messaggio
     std::istringstream archive_stream(std::string(message.begin(), message.end()));
@@ -223,7 +225,9 @@ void Message::syncRead(const boost::weak_ptr<tcp::socket>& socket_wptr, void con
 }
 
 //Scrittura sincrona del messaggio su boost_socket
-void Message::syncWrite(const boost::weak_ptr<tcp::socket>& socket_wptr, void connectionHandler()) const{
+void Message::syncWrite(const boost::weak_ptr<tcp::socket>& socket_wptr) const{
+
+    std::lock_guard<std::mutex> lg(asyncW_mtx);
 
     boost::system::error_code ec;
 
@@ -244,12 +248,7 @@ void Message::syncWrite(const boost::weak_ptr<tcp::socket>& socket_wptr, void co
     std::vector<boost::asio::const_buffer> buffers;
     buffers.emplace_back(boost::asio::buffer(outbound_header_));
     buffers.emplace_back(boost::asio::buffer(outbound_data_));
-    sizeW = boost::asio::write((*socket_wptr.lock()), buffers, boost::asio::transfer_exactly(buffers[0].size() + buffers[1].size()), ec);
-
-    if(ec) {
-        if ((ec == boost::asio::error::eof) || (ec == boost::asio::error::connection_reset)) connectionHandler();
-        else throw std::runtime_error(ec.message());
-    }
+    sizeW = boost::asio::write((*socket_wptr.lock()), buffers, boost::asio::transfer_exactly(buffers[0].size() + buffers[1].size()));
 
     if(sizeW != (buffers[0].size() + buffers[1].size())) throw std::runtime_error("Write Error");
 }
