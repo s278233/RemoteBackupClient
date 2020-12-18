@@ -7,16 +7,15 @@
 
 //Tipi di messaggio
 #define INVALID    -100
-#define FILE_ERR   -2
-#define AUTH_ERR   -1
 #define AUTH_REQ    0
 #define AUTH_RES    1
-#define AUTH_OK     2
-#define FILE_LIST   3
-#define DIR         4
+#define FILE_LIST   2
+#define DIR         3
+#define DIR_DEL     4
 #define FILE_START  5
 #define FILE_DATA   6
 #define FILE_END    7
+#define FILE_DEL    8
 
 //Delimitatori
 #define UDEL "/:USERNAME/"

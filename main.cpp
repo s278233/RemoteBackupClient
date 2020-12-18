@@ -33,7 +33,6 @@ std::list<std::pair<std::string,FileStatus>> upload_pool;
 std::list<std::string> path_ignore_pool;
 
 
-
 void checkDifferences(const std::map<std::string, std::string>& src,std::map<std::string, std::string>& dst){
     for(const auto& file:src)
         if(!dst.contains(file.first) || (dst.contains(file.first) && file.second != dst[file.first])) {
@@ -58,6 +57,8 @@ void FileWatcherThread(FileWatcher fw){
             return;
         }
 
+        std::lock_guard<std::mutex> lg(upload_mtx);
+
         switch(status) {
             case FileStatus::created:
                 SafeCout::safe_cout("File created: ", path_to_watch);
@@ -71,8 +72,10 @@ void FileWatcherThread(FileWatcher fw){
                 break;
             case FileStatus::erased:
                 SafeCout::safe_cout("File erased: ", path_to_watch);
-                upload_pool.push_front(std::pair(path_to_watch, FileStatus::erased));
-                upload_cv.notify_one();
+                if(std::filesystem::is_directory(path_to_watch))
+                    Message(DIR_DEL, std::vector<char>(path_to_watch.begin(), path_to_watch.end())).syncWrite(socket_wptr);
+                else
+                    Message(FILE_DEL, std::vector<char>(path_to_watch.begin(), path_to_watch.end())).syncWrite(socket_wptr);
                 break;
             default:
                 SafeCout::safe_cout("Error! Unknown file status.");
