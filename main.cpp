@@ -105,6 +105,7 @@ void FileUploaderDispatcherThread(){
             //Upload cartella
             if (std::filesystem::is_directory(file)) {
                 message = Message(DIR, std::vector<char>(file.begin(), file.end()));
+                message.syncWrite(socket_wptr);
             } else {
                 //Upload file
                 ifs.open(file, std::ios::binary);
@@ -151,7 +152,9 @@ void FileDownloaderDispatcherThread(){
     try {
 
         while (running.load()) {
-            download_cv.wait(lck);
+            download_cv.wait(lck, [](){
+                return !download_pool.empty();
+            });
             if(!running.load()) return;
 
             message = download_pool.back();
