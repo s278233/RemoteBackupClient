@@ -10,6 +10,10 @@
 
 #define CHUNK_SIZE 1024
 
+std::mutex FileWatcher::path_mtx;
+std::map<std::string, std::string> FileWatcher::paths_;
+
+
 std::string fileHash(const std::string& file){
     unsigned char tmp[SHA256_DIGEST_LENGTH];
     SHA256_CTX sha256;
@@ -55,46 +59,57 @@ FileWatcher::FileWatcher(const std::string& path_to_watch, std::chrono::duration
 void FileWatcher::start(const std::function<void (std::string, FileStatus)> &action) {
     std::string recomputedHash;
     while(running_.load()) {
-          // Wait for "delay" milliseconds
-             std::this_thread::sleep_for(delay);
+        // Wait for "delay" milliseconds
+        std::this_thread::sleep_for(delay);
 
-                    auto it = paths_.begin();
-                     while (it != paths_.end()) {
-                        if (!std::filesystem::exists(it->first)) {
-                                 action(it->first, FileStatus::erased);
-                                 if(!running_.load()) return;
-                                 it = paths_.erase(it);
-                             }  else {
-                               it++;
-                            }
-                      }
+        {
+            std::lock_guard<std::mutex> lg(path_mtx);
 
-                 // Check if a file was created or modified
-                 for(auto &file : std::filesystem::recursive_directory_iterator(path_to_watch)) {
+            //Rileva file cancellato
+            auto it = paths_.begin();
+            while (it != paths_.end()) {
+                if (!std::filesystem::exists(it->first)) {
+                    action(it->first, FileStatus::erased);
+                    if (!running_.load()) return;
+                    it = paths_.erase(it);
+                } else {
+                    it++;
+                }
+            }
 
-                           // File creation
-                           if(!paths_.contains(file.path().string())) {
-                               paths_[file.path().string()] = fileHash(file.path().string());
-                               action(file.path().string(), FileStatus::created);
-                               if(!running_.load()) return;
-                           }
-                           // File modification
-                           if(!std::filesystem::is_directory(file.path().string())) {
-                               recomputedHash = fileHash(file.path().string());
-                               if (paths_[file.path().string()] != recomputedHash) {
-                                   paths_[file.path().string()] = recomputedHash;
-                                   recomputedHash = "";
-                                   action(file.path().string(), FileStatus::modified);
-                                   if(!running_.load()) return;
-                               }
-                           }
-                                }
-                         }
-               }
+            // Check if a file was created or modified
+            for (auto &file : std::filesystem::recursive_directory_iterator(path_to_watch)) {
 
-const std::map<std::string, std::string> &FileWatcher::getPaths() const {
+                // File creation
+                if (!paths_.contains(file.path().string())) {
+                    paths_[file.path().string()] = fileHash(file.path().string());
+                    action(file.path().string(), FileStatus::created);
+                    if (!running_.load()) return;
+                }
+                // File modification
+                if (!std::filesystem::is_directory(file.path().string())) {
+                    recomputedHash = fileHash(file.path().string());
+                    if (paths_[file.path().string()] != recomputedHash) {
+                        paths_[file.path().string()] = recomputedHash;
+                        recomputedHash = "";
+                        action(file.path().string(), FileStatus::modified);
+                        if (!running_.load()) return;
+                    }
+                }
+            }
+        }
+    }
+}
+
+const std::map<std::string, std::string> &FileWatcher::getPaths() {
     return paths_;
 }
 
+void FileWatcher::addPath(const std::string &path) {
+    std::lock_guard<std::mutex> lg(path_mtx);
+    if(std::filesystem::is_regular_file(path))
+        paths_[path] = fileHash(path);
+    else paths_[path] = "";
+}
 
 

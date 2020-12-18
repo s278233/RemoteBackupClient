@@ -13,15 +13,17 @@
 #include <functional>
 #include <openssl/sha.h>
 #include <atomic>
+#include <mutex>
 
 
 // Define available file changes
 enum class FileStatus {created, modified, erased};
 
  class FileWatcher {
-     std::map<std::string, std::string> paths_;
+     static std::map<std::string, std::string> paths_;
+     static std::mutex path_mtx;
  public:
-     const std::map<std::string, std::string> &getPaths() const;
+     static const std::map<std::string, std::string> &getPaths() ;
 
  private:
      std::string path_to_watch;
@@ -30,6 +32,7 @@ enum class FileStatus {created, modified, erased};
  public:
      FileWatcher(const std::string& path_to_watch, std::chrono::duration<int, std::milli> delay, std::atomic_bool& running);
      void start(const std::function<void (std::string, FileStatus)> &action);
+     static void addPath(const std::string& path);
  };
 
 
