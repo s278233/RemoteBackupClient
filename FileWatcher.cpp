@@ -92,8 +92,9 @@ void FileWatcher::start(const std::function<void (std::string, FileStatus)> &act
                          }
                }
 
-const std::unordered_map<std::string, std::string> &FileWatcher::getPaths() const {
+const std::map<std::string, std::string> &FileWatcher::getPaths() const {
     return paths_;
 }
+
 
 

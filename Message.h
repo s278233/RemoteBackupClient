@@ -68,7 +68,7 @@ public:
 
     explicit Message(const std::pair<std::string, std::string>& authData);  //Costruttore per coppia<username, password>
 
-    explicit Message(const std::unordered_map<std::string, std::string>& paths);    //Costruttore per mappa <file/directory, hash>
+    explicit Message(const std::map<std::string, std::string>& paths);    //Costruttore per mappa <file/directory, hash>
 
 
     friend void swap(Message& src, Message& dst);   //SWAP
@@ -85,7 +85,7 @@ public:
 
     std::optional<std::pair<std::string, std::string>> extractAuthData();   //Estrazione pair<username, password> dal campo data
 
-    std::optional<std::unordered_map<std::string, std::string>> extractFileList();  //Estrazione mappa<file/directory, hash> dal campo data
+    std::optional<std::map<std::string, std::string>> extractFileList();  //Estrazione mappa<file/directory, hash> dal campo data
 
     void syncRead(const boost::weak_ptr<tcp::socket> &socket_wptr);    //Lettura sincrona del messaggio da boost_socket
 

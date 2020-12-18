@@ -34,16 +34,12 @@ std::list<std::string> path_ignore_pool;
 
 
 
-void checkDifferences(std::unordered_map<std::string, std::string>& src, std::unordered_map<std::string, std::string>& dst){
+void checkDifferences(const std::map<std::string, std::string>& src,std::map<std::string, std::string>& dst){
     for(const auto& file:src)
         if(!dst.contains(file.first) || (dst.contains(file.first) && file.second != dst[file.first])) {
-            std::lock_guard<std::mutex> lg(upload_mtx);
             upload_pool.push_front(std::pair(file.first, FileStatus::created));
-            upload_cv.notify_one();
         } else if(file.second != dst[file.first]) {
-            std::lock_guard<std::mutex> lg(upload_mtx);
             upload_pool.push_front(std::pair(file.first, FileStatus::modified));
-            upload_cv.notify_one();
         }
 }
 
@@ -98,31 +94,40 @@ void FileUploaderDispatcherThread(){
 
     try {
         while (running.load()) {
-            upload_cv.wait(lck);
+            upload_cv.wait(lck, [](){
+                return !upload_pool.empty();
+            });
             if (!running.load()) return;
             file = upload_pool.back().first;
 
             SafeCout::safe_cout("uploading ", file);
 
-
-            ifs.open(file, std::ios::binary);
-            message = Message(FILE_START, std::vector<char>(file.begin(), file.end()));
-            message.syncWrite(socket_wptr);
-            while (!ifs.eof()) {
-                ifs.read(buffer.data(), buffer.size());
-                size = ifs.gcount();
-                if (size < CHUNK_SIZE)
-                    buffer.resize(size);
-                message = Message(FILE_DATA, buffer);
+            //Upload cartella
+            if (std::filesystem::is_directory(file)) {
+                message = Message(DIR, std::vector<char>(file.begin(), file.end()));
+            } else {
+                //Upload file
+                ifs.open(file, std::ios::binary);
+                message = Message(FILE_START, std::vector<char>(file.begin(), file.end()));
                 message.syncWrite(socket_wptr);
-                buffer.clear();
+                if (std::filesystem::file_size(file) != 0)
+                    while (!ifs.eof()) {
+                        ifs.read(buffer.data(), buffer.size());
+                        size = ifs.gcount();
+                        if (size < CHUNK_SIZE)
+                            buffer.resize(size);
+                        message = Message(FILE_DATA, buffer);
+                        message.syncWrite(socket_wptr);
+                        buffer.clear();
+                    }
+                ifs.close();
+                message = Message(FILE_END);
+                message.syncWrite(socket_wptr);
             }
-            ifs.close();
-            message = Message(FILE_END);
-            message.syncWrite(socket_wptr);
+            upload_pool.pop_back();
         }
         SafeCout::safe_cout("FileUploader Thread terminato");
-    }catch (boost::system::system_error const &e) {SafeCout::safe_cout("scemo");
+    }catch (boost::system::system_error const &e) {
         SafeCout::safe_cout("FileUploader exception: ", e.what());
         if(!running.load()) return;
         if ((e.code() == boost::asio::error::eof) || (e.code() == boost::asio::error::connection_reset))
@@ -276,7 +281,7 @@ int main()
 
     //Dati di connessione
     auto src_ip = ip::address::from_string("127.0.0.1");
-    int src_port = 6003;
+    int src_port = 6004;
     auto dst_ip = ip::address::from_string("127.0.0.1");
     int dst_port = 5000;
 
@@ -305,7 +310,7 @@ int main()
         //Inizializzo fileList da inviare
         auto fileListW = fw.getPaths();
         auto fileListMessage = Message(fileListW);
-        std::optional<std::unordered_map<std::basic_string<char>, std::basic_string<char>>> fileListR;
+        std::optional<std::map<std::string, std::string>> fileListR;
 
         while(true) {
         //Autenticazione(two-way)
@@ -348,20 +353,21 @@ int main()
         rt.detach();
 
         //Inizializzo il thread che gestische i download dei file
-        std::thread fdt(FileDownloaderDispatcherThread);
-        fdt.detach();
+        //std::thread fdt(FileDownloaderDispatcherThread);
+        //fdt.detach();
 
         //Inizializzo il thread che gestice l'upload dei file
         std::thread fut(FileUploaderDispatcherThread);
         fut.detach();
 
-        //Avvio tutti i thread
-        running.store(true);
-
-            SafeCout::safe_cout("Processando le differenze...");
+        SafeCout::safe_cout("Processando le differenze...");
 
         //Processo differenze tra le fileList
         checkDifferences(fileListW, fileListR.value());
+
+        //Avvio tutti i thread
+        running.store(true);
+
 
         //Gestisco possibili connection lost
         while (running.load()) {
