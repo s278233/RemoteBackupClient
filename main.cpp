@@ -345,6 +345,8 @@ int main()
             message.syncRead(socket_wptr);
             fileListR = message.extractFileList();
 
+            if(!fileListR.has_value()) throw std::runtime_error("Error FileList synchronization!");
+
         } catch (boost::system::system_error const &e) {
             SafeCout::safe_cout(e.what());
             throw std::runtime_error("Handshake Error!");
