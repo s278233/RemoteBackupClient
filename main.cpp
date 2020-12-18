@@ -119,6 +119,7 @@ void FileUploaderDispatcherThread(){
                         message = Message(FILE_DATA, buffer);
                         message.syncWrite(socket_wptr);
                         buffer.clear();
+                        std::vector<char>(CHUNK_SIZE).swap(buffer);
                     }
                 ifs.close();
                 message = Message(FILE_END);
