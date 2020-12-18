@@ -17,7 +17,7 @@
 
 
 // Define available file changes
-enum class FileStatus {created, modified, erased};
+enum class FileStatus {created, modified, erasedFile, erasedDir};
 
  class FileWatcher {
      static std::map<std::string, std::string> paths_;

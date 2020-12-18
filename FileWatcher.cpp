@@ -7,6 +7,7 @@
 #include <map>
 #include <iostream>
 #include "FileWatcher.h"
+#include "SafeCout.h"
 
 #define CHUNK_SIZE 1024
 
@@ -69,20 +70,35 @@ void FileWatcher::start(const std::function<void (std::string, FileStatus)> &act
             auto it = paths_.begin();
             while (it != paths_.end()) {
                 if (!std::filesystem::exists(it->first)) {
-                    action(it->first, FileStatus::erased);
-                    if (!running_.load()) return;
+                    if(it->second.empty()) {
+                        action(it->first, FileStatus::erasedDir);
+                        //Rimozione di tutti i path inclusi nella cartella eliminata
+                        auto itInner = paths_.begin();
+                        while(itInner != paths_.end()) {
+                            if (itInner->first.find(it->first) != std::string::npos && itInner->first != it->first) {
+                                itInner = paths_.erase(itInner);
+                            } else itInner++;
+                        }
+                    }
+                    else {
+                        action(it->first, FileStatus::erasedFile);
+                    }
                     it = paths_.erase(it);
+                    if (!running_.load()) return;
                 } else {
                     it++;
                 }
             }
+
 
             // Check if a file was created or modified
             for (auto &file : std::filesystem::recursive_directory_iterator(path_to_watch)) {
 
                 // File creation
                 if (!paths_.contains(file.path().string())) {
-                    paths_[file.path().string()] = fileHash(file.path().string());
+                    if(file.is_regular_file())
+                        paths_[file.path().string()] = fileHash(file.path().string());
+                    else paths_[file.path().string()] = "";
                     action(file.path().string(), FileStatus::created);
                     if (!running_.load()) return;
                 }

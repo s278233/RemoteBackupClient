@@ -50,8 +50,9 @@ void FileWatcherThread(FileWatcher fw){
 
     fw.start([] (const std::string& path_to_watch, FileStatus status) -> void {
         if(!running.load()) return;
-        //Processo solo i file che non sono in download
-        if(!std::filesystem::is_regular_file(std::filesystem::path(path_to_watch)) && status != FileStatus::erased
+        //Processo solo i file che non sono in download e i file/dir non corrotte
+        if((!std::filesystem::is_regular_file(path_to_watch) && !std::filesystem::is_directory(path_to_watch))
+        && status != FileStatus::erasedFile && status != FileStatus::erasedDir
         && (!(std::find(path_ignore_pool.begin(), path_ignore_pool.end(), path_to_watch) != path_ignore_pool.end())
         )) {
             return;
@@ -70,12 +71,13 @@ void FileWatcherThread(FileWatcher fw){
                 upload_pool.push_front(std::pair(path_to_watch, FileStatus::modified));
                 upload_cv.notify_one();
                 break;
-            case FileStatus::erased:
+            case FileStatus::erasedFile:
                 SafeCout::safe_cout("File erased: ", path_to_watch);
-                if(std::filesystem::is_directory(path_to_watch))
-                    Message(DIR_DEL, std::vector<char>(path_to_watch.begin(), path_to_watch.end())).syncWrite(socket_wptr);
-                else
-                    Message(FILE_DEL, std::vector<char>(path_to_watch.begin(), path_to_watch.end())).syncWrite(socket_wptr);
+                Message(FILE_DEL, std::vector<char>(path_to_watch.begin(), path_to_watch.end())).syncWrite(socket_wptr);
+                break;
+            case FileStatus::erasedDir:
+                SafeCout::safe_cout("Directory erased: ", path_to_watch);
+                Message(DIR_DEL, std::vector<char>(path_to_watch.begin(), path_to_watch.end())).syncWrite(socket_wptr);
                 break;
             default:
                 SafeCout::safe_cout("Error! Unknown file status.");
@@ -294,7 +296,7 @@ int main()
 
     //Dati di connessione
     auto src_ip = ip::address::from_string("127.0.0.1");
-    int src_port = 6009;
+    int src_port = 6007;
     auto dst_ip = ip::address::from_string("127.0.0.1");
     int dst_port = 5000;
 
