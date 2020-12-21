@@ -9,6 +9,8 @@
 
 #define CHUNK_SIZE 1024
 
+#define MAX_PORT_RANGE 10
+
 using namespace boost::filesystem;
 using namespace boost::archive;
 using namespace boost::asio;
@@ -299,23 +301,19 @@ int main()
 
     //Dati di connessione
     auto src_ip = ip::address::from_string("127.0.0.1");
-    int src_port = 6007;
+    int src_port = 6000;
     auto dst_ip = ip::address::from_string("127.0.0.1");
     int dst_port = 5000;
 
     //Connessione col server
     io_context ioc;
     auto socket_ = boost::make_shared<tcp::socket>(ioc);
-    socket_wptr = boost::weak_ptr<tcp::socket>(socket_);
 
     //Creazione socket
     socket_->open(boost::asio::ip::tcp::v4(), ec);
     if(ec) throw std::runtime_error("Error opening socket!");
-    tcp::endpoint localEndpoint(src_ip, src_port);
-    socket_->bind(localEndpoint, ec);
-    if(ec) throw std::runtime_error("Bind Error!");
-    socket_->connect(tcp::endpoint(dst_ip,dst_port), ec);
-    if(ec) throw std::runtime_error("Can't connect to remote server!");
+    int portCounter=0;
+
 
 
     SafeCout::safe_cout("FileWatcher inizializzazione...");
@@ -331,6 +329,30 @@ int main()
         std::optional<std::map<std::string, std::string>> fileListR;
 
         while(true) {
+
+            while (!running.load()) {
+
+                if(portCounter == MAX_PORT_RANGE)   portCounter = 0;
+
+                //Connessione col server
+                tcp::endpoint localEndpoint(src_ip, src_port + portCounter);
+                socket_->bind(localEndpoint, ec);
+                if(ec) SafeCout::safe_cout("Bind Error!");
+
+                socket_->connect(tcp::endpoint(dst_ip, dst_port), ec);
+                if (!ec) {
+                    SafeCout::safe_cout("Connessione Riuscita!");
+                    socket_wptr = boost::weak_ptr<tcp::socket>(socket_);
+                    break;
+                } else SafeCout::safe_cout("Can't connect to remote server!","\n", "Trying to reconnect...");
+                std::this_thread::sleep_for(std::chrono::seconds(RECONN_DELAY));
+                socket_->shutdown(boost::asio::ip::tcp::socket::shutdown_both, ec);
+                socket_->close();
+                socket_.reset(new boost::asio::ip::tcp::socket(ioc));
+                socket_->open(boost::asio::ip::tcp::v4(), ec);
+                portCounter++;
+            }
+
         //Autenticazione(two-way)
 
             SafeCout::safe_cout("Autenticazione...");
@@ -397,21 +419,16 @@ int main()
             download_cv.notify_all();
             upload_cv.notify_all();
 
-            while (!running.load()) {
-                //Reconnection
-                socket_.reset(new boost::asio::ip::tcp::socket(ioc));
-                socket_->connect(tcp::endpoint(dst_ip, dst_port), ec);
-                if (!ec) {
-                    SafeCout::safe_cout("Riconnessione riuscita!");
-                    socket_wptr = boost::weak_ptr<tcp::socket>(socket_);
-                    break;
-                }
-                std::this_thread::sleep_for(std::chrono::seconds(RECONN_DELAY));
-            }
+
             if(rt.joinable())   rt.join();
             if(fwt.joinable())  fwt.join();
             if(fdt.joinable())  fdt.join();
             if(fut.joinable())  fut.join();
+
+            socket_->shutdown(boost::asio::ip::tcp::socket::shutdown_both, ec);
+            socket_->close();
+            socket_.reset(new boost::asio::ip::tcp::socket(ioc));
+            socket_->open(boost::asio::ip::tcp::v4(), ec);
             break;
         }
     }
