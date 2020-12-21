@@ -173,7 +173,10 @@ void FileDownloaderDispatcherThread(){
 
             SafeCout::safe_cout("downloading ", path);
 
-            if(message.getType() == DIR) std::filesystem::create_directory(path);
+            if(message.getType() == DIR) {
+                FileWatcher::addPath(path);
+                std::filesystem::create_directory(path);
+            }
 
             else if (message.getType() != FILE_START) {
                 SafeCout::safe_cout("Error File Download");
