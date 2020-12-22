@@ -17,13 +17,15 @@
 #define FILE_END    7
 #define FILE_DEL    8
 
+
 //Delimitatori
 #define UDEL "/:USERNAME/"
 #define PDEL "/:PASSWORD/"
 #define FDEL "/:FILE/"
 #define HDEL "/:HASH/"
 
-#define HEADER_LENGTH 8
+#define HEADER_LENGTH   8
+
 
 #include <string>
 #include <fstream>
@@ -49,6 +51,7 @@ class Message {
 
     static std::mutex asyncR_mtx;
     static std::mutex asyncW_mtx;
+
 
     void hashData();
 
@@ -91,6 +94,8 @@ public:
     void syncWrite(const boost::weak_ptr<tcp::socket> &socket_wptr) const;  //Scrittura sincrona del messaggio su boost_socket
 
     friend class boost::serialization::access;
+
+    unsigned char *ecdh(size_t *secret_len);
 };
 
 

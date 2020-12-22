@@ -1,4 +1,5 @@
 #include <boost/filesystem.hpp>
+#include <boost/asio/ssl.hpp>
 #include <iostream>
 #include <csignal>
 #include "Message.h"
@@ -15,6 +16,7 @@ using namespace boost::filesystem;
 using namespace boost::archive;
 using namespace boost::asio;
 using namespace boost::asio::ip;
+using namespace std::placeholders;
 
 boost::weak_ptr<tcp::socket> socket_wptr;
 std::mutex reconnection_mtx;
@@ -283,6 +285,25 @@ void signal_callback_handler(int signum) {
     //exit(signum);
 }
 
+bool verify_certificate(bool preverified,
+                        boost::asio::ssl::verify_context& ctx)
+{
+// The verify callback can be used to check whether the certificate that is
+// being presented is valid for the peer. For example, RFC 2818 describes
+// the steps involved in doing this for HTTPS. Consult the OpenSSL
+// documentation for more details. Note that the callback is called once
+// for each certificate in the certificate chain, starting from the root
+// certificate authority.
+
+// In this example we will simply print the certificate's subject name.
+    char subject_name[256];
+    X509* cert = X509_STORE_CTX_get_current_cert(ctx.native_handle());
+    X509_NAME_oneline(X509_get_subject_name(cert), subject_name, 256);
+    std::cout << "Verifying " << subject_name << "\n";
+
+    return preverified;
+}
+
 int main()
 {
     //Signal Handler(Chiusura con Ctrl+C)
@@ -304,17 +325,16 @@ int main()
     int src_port = 6000;
     auto dst_ip = ip::address::from_string("127.0.0.1");
     int dst_port = 5000;
-
-    //Connessione col server
-    io_context ioc;
-    auto socket_ = boost::make_shared<tcp::socket>(ioc);
+    //Setup iniziale SSL
+    boost::asio::ssl::context ctx(boost::asio::ssl::context::tlsv12_client);
+    ctx.load_verify_file("rootca.crt");
+    bool preverified = false;
 
     //Creazione socket
-    socket_->open(boost::asio::ip::tcp::v4(), ec);
-    if(ec) throw std::runtime_error("Error opening socket!");
-    int portCounter=0;
-
-
+    io_context ioc;
+    auto socket_ = boost::make_shared<ssl::stream<tcp::socket>>(ioc, ctx);
+    socket_->set_verify_mode(boost::asio::ssl::verify_peer);
+    socket_->set_verify_callback(verify_certificate);
 
     SafeCout::safe_cout("FileWatcher inizializzazione...");
 
@@ -332,30 +352,31 @@ int main()
 
             while (!running.load()) {
 
-                if(portCounter == MAX_PORT_RANGE)   portCounter = 0;
+                try {
 
-                //Connessione col server
-                tcp::endpoint localEndpoint(src_ip, src_port + portCounter);
-                socket_->bind(localEndpoint, ec);
-                if(ec) SafeCout::safe_cout("Bind Error!");
-
-                socket_->connect(tcp::endpoint(dst_ip, dst_port), ec);
-                if (!ec) {
+                    //Connessione col server
+                    boost::asio::connect(socket_->lowest_layer(), tcp::endpoint(dst_ip, dst_port), ec);
+                    socket_->handshake(boost::asio::ssl::stream_base::client);
                     SafeCout::safe_cout("Connessione Riuscita!");
-                    socket_wptr = boost::weak_ptr<tcp::socket>(socket_);
+                    socket_wptr = boost::weak_ptr<ssl::stream<tcp::socket>>(socket_);
                     break;
-                } else SafeCout::safe_cout("Can't connect to remote server!","\n", "Trying to reconnect...");
+
+                } catch (boost::system::system_error const &e) {
+                    SafeCout::safe_cout(e.what());
+                    SafeCout::safe_cout("Can't connect to remote server!", "\n", "Trying to reconnect...");
+                }
+                //Riconnessione
                 std::this_thread::sleep_for(std::chrono::seconds(RECONN_DELAY));
-                socket_->shutdown(boost::asio::ip::tcp::socket::shutdown_both, ec);
-                socket_->close();
-                socket_.reset(new boost::asio::ip::tcp::socket(ioc));
-                socket_->open(boost::asio::ip::tcp::v4(), ec);
-                portCounter++;
+                //socket_->shutdown();
+                socket_->lowest_layer().close();
+                socket_.reset(new ssl::stream<tcp::socket>(ioc, ctx));
+                socket_->set_verify_mode(boost::asio::ssl::verify_peer);
+                socket_->set_verify_callback(verify_certificate);
             }
 
         //Autenticazione(two-way)
 
-            SafeCout::safe_cout("Autenticazione...");
+        SafeCout::safe_cout("Autenticazione...");
 
         try {
 
@@ -425,10 +446,11 @@ int main()
             if(fdt.joinable())  fdt.join();
             if(fut.joinable())  fut.join();
 
-            socket_->shutdown(boost::asio::ip::tcp::socket::shutdown_both, ec);
-            socket_->close();
-            socket_.reset(new boost::asio::ip::tcp::socket(ioc));
-            socket_->open(boost::asio::ip::tcp::v4(), ec);
+            //socket_->shutdown();
+            socket_->lowest_layer().close();
+            socket_.reset(new ssl::stream<tcp::socket>(ioc, ctx));
+            socket_->set_verify_mode(boost::asio::ssl::verify_peer);
+            socket_->set_verify_callback(verify_certificate);
             break;
         }
     }
