@@ -10,15 +10,13 @@
 
 #define CHUNK_SIZE 1024
 
-#define MAX_PORT_RANGE 10
-
 using namespace boost::filesystem;
 using namespace boost::archive;
 using namespace boost::asio;
 using namespace boost::asio::ip;
 using namespace std::placeholders;
 
-boost::weak_ptr<tcp::socket> socket_wptr;
+boost::weak_ptr<ssl::stream<tcp::socket>> socket_wptr;
 std::mutex reconnection_mtx;
 std::condition_variable reconnection_cv;
 
@@ -304,7 +302,7 @@ bool verify_certificate(bool preverified,
     return preverified;
 }
 
-int main()
+int main(int argc, char* argv[])
 {
     //Signal Handler(Chiusura con Ctrl+C)
 //    signal(SIGINT, signal_callback_handler);
@@ -315,23 +313,23 @@ int main()
     Message message;
 
     //Dati di autenticazione
-    auto username = std::string("gold");
-    auto password = std::string("experience");
+    auto username = std::string(argv[3]);
+    auto password = std::string(argv[4]);
     auto auth_data = std::pair<std::string, std::string>(username, password);
 
 
     //Dati di connessione
-    auto src_ip = ip::address::from_string("127.0.0.1");
-    int src_port = 6000;
-    auto dst_ip = ip::address::from_string("127.0.0.1");
-    int dst_port = 5000;
+    auto dst_ip = ip::address::from_string(argv[1]);
+    int dst_port = std::atoi(argv[2]);
+
     //Setup iniziale SSL
     boost::asio::ssl::context ctx(boost::asio::ssl::context::tlsv12_client);
-    ctx.load_verify_file("rootca.crt");
-    bool preverified = false;
+    ctx.load_verify_file("../sec-files/rootca.crt");
 
     //Creazione socket
     io_context ioc;
+    tcp::resolver resolver(ioc);
+    auto endpoints = resolver.resolve(tcp::endpoint(dst_ip, dst_port));
     auto socket_ = boost::make_shared<ssl::stream<tcp::socket>>(ioc, ctx);
     socket_->set_verify_mode(boost::asio::ssl::verify_peer);
     socket_->set_verify_callback(verify_certificate);
@@ -355,7 +353,7 @@ int main()
                 try {
 
                     //Connessione col server
-                    boost::asio::connect(socket_->lowest_layer(), tcp::endpoint(dst_ip, dst_port), ec);
+                    boost::asio::connect(socket_->lowest_layer(), endpoints, ec);
                     socket_->handshake(boost::asio::ssl::stream_base::client);
                     SafeCout::safe_cout("Connessione Riuscita!");
                     socket_wptr = boost::weak_ptr<ssl::stream<tcp::socket>>(socket_);

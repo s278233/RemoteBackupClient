@@ -12,35 +12,6 @@ std::mutex Message::asyncW_mtx;
 
 //COSTRUTTORI, OVERLOADS E DISTRUTTORE
 
-//Costruttore di copia
-Message::Message(const Message &m) {
-    this->type = m.type;
-    this->data = m.data;
-    this->hash= m.hash;
-}
-
-//Costruttore di movimento
-Message::Message(Message &&src) noexcept : type(INVALID){
-    this->hash.clear();
-    swap(*this, src);
-}
-
-//Overload operatore di assegnazione tramite copia
-Message &Message::operator=(const Message &src) {
-    Message copy(src);
-    swap(*this, copy);
-    return *this;
-}
-
-//Overload operatore di assegnazione tramite movimento
-Message &Message::operator=(Message&& src) noexcept{
-    swap(*this, src);
-    return *this;
-}
-
-//Distruttore
-Message::~Message() = default;
-
 //Costruttore per messaggio vuoto
 Message::Message() {
     this->type = INVALID;
@@ -191,7 +162,7 @@ std::optional<std::map<std::string, std::string>> Message::extractFileList(){
 }
 
 //Lettura sincrona del messaggio da boost_socket
-void Message::syncRead(const boost::weak_ptr<tcp::socket>& socket_wptr){
+void Message::syncRead(const boost::weak_ptr<ssl::stream<tcp::socket>>& socket_wptr){
 
     std::lock_guard<std::mutex> lg(asyncR_mtx);
 
@@ -225,7 +196,7 @@ void Message::syncRead(const boost::weak_ptr<tcp::socket>& socket_wptr){
 }
 
 //Scrittura sincrona del messaggio su boost_socket
-void Message::syncWrite(const boost::weak_ptr<tcp::socket>& socket_wptr) const{
+void Message::syncWrite(const boost::weak_ptr<ssl::stream<tcp::socket>>& socket_wptr) const{
 
     std::lock_guard<std::mutex> lg(asyncW_mtx);
 

@@ -16,9 +16,9 @@ find_package(Boost 1.6.0 REQUIRED COMPONENTS filesystem serialization)
 include_directories(${Boost_INCLUDE_DIR})
 # Note: a target should be already defined using 'add_executable' or 'add_library'
 if(CMAKE_SYSTEM_NAME STREQUAL Linux OR CMAKE_SYSTEM_NAME STREQUAL Darwin)
-    target_link_libraries(RemoteBackupClient PRIVATE Threads::Threads ${Boost_LIBRARIES} crypto)
+    target_link_libraries(RemoteBackupClient PRIVATE Threads::Threads ${Boost_LIBRARIES} crypto ssl)
 else()
-    target_link_libraries(RemoteBackupClient ${Boost_LIBRARIES} crypto)
+    target_link_libraries(RemoteBackupClient ${Boost_LIBRARIES} crypto ssl)
 endif()
 
 #If "file does not belong to any project" warning appears just do:

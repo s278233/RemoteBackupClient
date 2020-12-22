@@ -39,6 +39,8 @@
 #include <boost/archive/text_oarchive.hpp>
 #include <boost/archive/text_iarchive.hpp>
 #include <boost/weak_ptr.hpp>
+#include <boost/asio/ssl.hpp>
+
 
 using namespace boost::archive;
 using namespace boost::asio;
@@ -56,11 +58,6 @@ class Message {
     void hashData();
 
 public:
-    Message(const Message& m);  //Costruttore di copia
-    Message(Message &&src) noexcept;    //Costruttore di movimento
-    Message& operator= (const Message &m);  //Overload operatore di assegnazione tramite copia
-    Message& operator=(Message&& src) noexcept ;    //Overload operatore di assegnazione tramite movimento
-    virtual ~Message(); //Distruttore
 
     Message();  //Costruttore per messaggio vuoto
 
@@ -89,9 +86,9 @@ public:
 
     std::optional<std::map<std::string, std::string>> extractFileList();  //Estrazione mappa<file/directory, hash> dal campo data
 
-    void syncRead(const boost::weak_ptr<tcp::socket> &socket_wptr);    //Lettura sincrona del messaggio da boost_socket
+    void syncRead(const boost::weak_ptr<ssl::stream<tcp::socket>> &socket_wptr);    //Lettura sincrona del messaggio da boost_socket
 
-    void syncWrite(const boost::weak_ptr<tcp::socket> &socket_wptr) const;  //Scrittura sincrona del messaggio su boost_socket
+    void syncWrite(const boost::weak_ptr<ssl::stream<tcp::socket>> &socket_wptr) const;  //Scrittura sincrona del messaggio su boost_socket
 
     friend class boost::serialization::access;
 
