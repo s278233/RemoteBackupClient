@@ -95,7 +95,6 @@ public:
 
     friend class boost::serialization::access;
 
-    unsigned char *ecdh(size_t *secret_len);
 };
 
 

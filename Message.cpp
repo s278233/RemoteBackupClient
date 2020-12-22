@@ -59,8 +59,6 @@ Message::Message(const std::pair<std::string, std::string>& authData) {
     this->type = AUTH_RES;
     std::string tmp;
 
-    auto shared_secret = ecdh(SECRET_LENGTH);
-
     tmp += authData.first + UDEL + authData.second + PDEL;
 
     this->data = std::vector<char>(tmp.begin(), tmp.end());
