@@ -304,6 +304,8 @@ bool verify_certificate(bool preverified,
 
 int main(int argc, char* argv[])
 {
+    if(argc<4) throw std::runtime_error("Too few arguments! (server_ip server_port username password");
+
     //Signal Handler(Chiusura con Ctrl+C)
 //    signal(SIGINT, signal_callback_handler);
 
@@ -319,8 +321,29 @@ int main(int argc, char* argv[])
 
 
     //Dati di connessione
-    auto dst_ip = ip::address::from_string(argv[1]);
-    int dst_port = std::atoi(argv[2]);
+    address dst_ip;
+    int dst_port;
+
+
+    try {
+        auto ip = std::string(argv[1]);
+        dst_ip = ip::make_address(ip);
+    } catch (boost::system::system_error const &e) {
+        throw std::runtime_error("Invalid IP");
+    }
+
+    //Controlo parametri programma
+    try {
+        auto port = std::string(argv[2]);
+        dst_port = std::atoi(port.c_str());
+        if(dst_port < 0 || dst_port > 655535) {
+            std::cerr<<"Invalid Port"<<std::endl;
+            return 1;
+        }
+
+    } catch (const std::runtime_error &e) {
+        throw std::runtime_error("Invalid Port");
+    }
 
     //Setup iniziale SSL
     boost::asio::ssl::context ctx(boost::asio::ssl::context::tlsv12_client);
@@ -360,12 +383,10 @@ int main(int argc, char* argv[])
                     break;
 
                 } catch (boost::system::system_error const &e) {
-                    SafeCout::safe_cout(e.what());
                     SafeCout::safe_cout("Can't connect to remote server!", "\n", "Trying to reconnect...");
                 }
                 //Riconnessione
                 std::this_thread::sleep_for(std::chrono::seconds(RECONN_DELAY));
-                //socket_->shutdown();
                 socket_->lowest_layer().close();
                 socket_.reset(new ssl::stream<tcp::socket>(ioc, ctx));
                 socket_->set_verify_mode(boost::asio::ssl::verify_peer);
