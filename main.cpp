@@ -294,7 +294,7 @@ bool verify_certificate(bool preverified,
 
 int main(int argc, char* argv[])
 {
-    if(argc!=4) throw std::runtime_error("Wrong number of arguments! (server_ip server_port username password");
+    if(argc!=5) throw std::runtime_error("Wrong number of arguments! (server_ip server_port username password");
 
     boost::system::error_code ec;
     Message message;
@@ -343,14 +343,9 @@ int main(int argc, char* argv[])
     SafeCout::safe_cout("FileWatcher inizializzazione...");
 
     //Inizializzo il filewatcher (viene effettuato un primo controllo all'avvio sui file)
-       FileWatcher fw{"../" + username, std::chrono::milliseconds(5000), running};//5 sec di delay
+    FileWatcher fw{"../" + username, std::chrono::milliseconds(5000), running};//5 sec di delay
 
     SafeCout::safe_cout("FileWatcher inizializzato");
-
-    //Inizializzo fileList da inviare
-    auto fileListW = FileWatcher::getPaths();
-    auto fileListMessage = Message(fileListW);
-    std::optional<std::map<std::string, std::string>> fileListR;
 
         while(true) {
 
@@ -378,8 +373,11 @@ int main(int argc, char* argv[])
 
 
         //Autenticazione(two-way)
-
         SafeCout::safe_cout("Autenticazione...");
+
+        //Inizializzo fileList da inviare
+        auto fileListW = FileWatcher::getPaths();
+        std::optional<std::map<std::string, std::string>> fileListR;
 
         try {
 
@@ -392,7 +390,7 @@ int main(int argc, char* argv[])
             authMessage.syncWrite(socket_wptr);
 
             //Scambio lista file
-            fileListMessage.syncWrite(socket_wptr);
+            Message(fileListW).syncWrite(socket_wptr);
             message.syncRead(socket_wptr);
             fileListR = message.extractFileList();
 
