@@ -294,7 +294,7 @@ bool verify_certificate(bool preverified,
 
 int main(int argc, char* argv[])
 {
-    if(argc!=4) throw std::runtime_error("Too few arguments! (server_ip server_port username password");
+    if(argc!=4) throw std::runtime_error("Wrong number of arguments! (server_ip server_port username password");
 
     boost::system::error_code ec;
     Message message;
