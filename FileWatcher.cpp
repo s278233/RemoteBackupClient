@@ -33,6 +33,10 @@ std::string fileHash(const std::string& file){
         if(!success) break;
     }
 
+    if(!success) {
+        return "";
+    }
+
     ifs.close();
 
     success = SHA256_Final(tmp, &sha256);
@@ -62,7 +66,7 @@ FileWatcher::FileWatcher(const std::string& path_to_watch, std::chrono::duration
 void FileWatcher::start(const std::function<void (std::string, FileStatus)> &action) {
     std::string recomputedHash;
     while(running_.load()) {
-        // Wait for "delay" milliseconds
+        //Dorme per un tempo pari a delay
         std::this_thread::sleep_for(delay);
 
         {
@@ -96,7 +100,7 @@ void FileWatcher::start(const std::function<void (std::string, FileStatus)> &act
             // Check if a file was created or modified
             for (auto &file : std::filesystem::recursive_directory_iterator(path_to_watch)) {
 
-                // File creation
+                // Creazione file
                 if (!paths_.contains(file.path().string())) {
                     if(file.is_regular_file())
                         paths_[file.path().string()] = fileHash(file.path().string());
@@ -104,7 +108,7 @@ void FileWatcher::start(const std::function<void (std::string, FileStatus)> &act
                     action(file.path().string(), FileStatus::created);
                     if (!running_.load()) return;
                 }
-                // File modification
+                // Modifica file
                 if (!std::filesystem::is_directory(file.path().string())) {
                     recomputedHash = fileHash(file.path().string());
                     if (paths_[file.path().string()] != recomputedHash) {

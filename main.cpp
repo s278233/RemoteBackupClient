@@ -273,13 +273,6 @@ void ReceiverThread(){
 
 }
 
-void signal_callback_handler(int signum) {
-    SafeCout::safe_cout("Caught signal ", signum);
-    // Terminate program
-    running.store(false);
-    //exit(signum);
-}
-
 bool verify_certificate(bool preverified,
                         boost::asio::ssl::verify_context& ctx)
 {
@@ -301,12 +294,7 @@ bool verify_certificate(bool preverified,
 
 int main(int argc, char* argv[])
 {
-    if(argc<4) throw std::runtime_error("Too few arguments! (server_ip server_port username password");
-
-    //Signal Handler(Chiusura con Ctrl+C)
-//    signal(SIGINT, signal_callback_handler);
-
-    SafeCout::safe_cout("Ctrl+C to close the program..."); //Funzionalità non ancora implementata
+    if(argc!=4) throw std::runtime_error("Too few arguments! (server_ip server_port username password");
 
     boost::system::error_code ec;
     Message message;
