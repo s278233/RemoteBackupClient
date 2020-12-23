@@ -255,7 +255,7 @@ std::string Message::unsignedCharToHEX(unsigned char* src, size_t src_length){
 
 unsigned char* Message::HEXtoUnsignedChar(const std::string& src){
 
-    auto tmp= new unsigned char[src.length()/2]{0};
+    auto tmp = new unsigned char[src.length()/2]{0};
     unsigned int number = 0;
 
     for(int i=0, j = 0;i<src.length();i+=2, j++) {
@@ -277,6 +277,9 @@ std::string Message::compute_password(const std::string& password, const std::st
                       dkey_lenght, key);
 
     auto key_HEX = unsignedCharToHEX(key, dkey_lenght);
+
+    delete[] salt_;
+    delete[] key;
 
     return key_HEX;
 

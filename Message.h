@@ -57,7 +57,11 @@ class Message {
     static std::mutex asyncW_mtx;
 
 
-    void hashData();
+    void hashData();    //Calcolo digest
+    static std::string unsignedCharToHEX(unsigned char *src, size_t src_length);  //Conversione da unsigned char* a string
+    static unsigned char* HEXtoUnsignedChar(const std::string& src);    //Conversione da string ad unsigned char*
+    static unsigned char *generate_salt(int salt_length);   //Produzione sale crittografico
+
 
 public:
 
@@ -92,13 +96,7 @@ public:
 
     void syncWrite(const boost::weak_ptr<ssl::stream<tcp::socket>> &socket_wptr) const;  //Scrittura sincrona del messaggio su boost_socket
 
-    static std::string unsignedCharToHEX(unsigned char *src, size_t src_length);  //Conversione da unsigned char* a string
-
-    static unsigned char* HEXtoUnsignedChar(const std::string& src);    //Conversione da string ad unsigned char*
-
     static std::string compute_password(const std::string& password, const std::string& salt, int iterations, int dkey_lenght); //PBKDF2
-
-    static unsigned char *generate_salt(int salt_length);   //Produzione sale crittografico
 
     friend class boost::serialization::access;
 };
