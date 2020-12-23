@@ -14,6 +14,7 @@
 #include <openssl/sha.h>
 #include <atomic>
 #include <mutex>
+#include "Message.h"
 
 
 // Define available file changes

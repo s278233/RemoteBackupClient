@@ -58,12 +58,13 @@ class Message {
 
 
     void hashData();    //Calcolo digest
-    static std::string unsignedCharToHEX(unsigned char *src, size_t src_length);  //Conversione da unsigned char* a string
     static unsigned char* HEXtoUnsignedChar(const std::string& src);    //Conversione da string ad unsigned char*
     static unsigned char *generate_salt(int salt_length);   //Produzione sale crittografico
 
 
 public:
+
+    static std::string unsignedCharToHEX(unsigned char *src, size_t src_length);  //Conversione da unsigned char* a string
 
     Message();  //Costruttore per messaggio vuoto
 

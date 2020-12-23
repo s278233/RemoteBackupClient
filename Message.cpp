@@ -229,6 +229,7 @@ void Message::syncWrite(const boost::weak_ptr<ssl::stream<tcp::socket>>& socket_
 
 //Riempimento del campo hash
 void Message::hashData(){
+    int success;
 
     if(this->data.empty()) return;
 
@@ -236,45 +237,68 @@ void Message::hashData(){
 
     //Calcolo hash
     SHA256_CTX sha256;
-    SHA256_Init(&sha256);
-    SHA256_Update(&sha256, this->data.data(), this->data.size());
-    SHA256_Final(hash_, &sha256);
+    success = SHA256_Init(&sha256);
+    if(!success) {
+        this->hash = "";
+        return;
+    }
+    success = SHA256_Update(&sha256, this->data.data(), this->data.size());
+    if(!success){
+        this->hash = "";
+        return;
+    }
+    success = SHA256_Final(hash_, &sha256);
+    if(!success){
+        this->hash = "";
+        return;
+    }
 
 
     this->hash = unsignedCharToHEX(hash_, SHA256_DIGEST_LENGTH);
 }
 
 std::string Message::unsignedCharToHEX(unsigned char* src, size_t src_length){
+    int error;
     char tmp[2*src_length+1];
     tmp[2*src_length] = 0;
-    for (int i = 0; i < src_length; i++)
-        sprintf(tmp+i*2, "%02x", src[i]);
+    for (int i = 0; i < src_length; i++) {
+        error = sprintf(tmp + i * 2, "%02x", src[i]);
+        if(error < 0) break;
+    }
+
+    if(error < 0) return "";
 
     return std::string(tmp);
 }
 
 unsigned char* Message::HEXtoUnsignedChar(const std::string& src){
-
+    int error;
     auto tmp = new unsigned char[src.length()/2]{0};
     unsigned int number = 0;
 
     for(int i=0, j = 0;i<src.length();i+=2, j++) {
-        sscanf(&src.c_str()[i], "%02x", &number);
+        error = sscanf(&src.c_str()[i], "%02x", &number);
+        if(error == EOF) break;
         tmp[j] = (unsigned char) number;
     }
+
+    if(error == EOF) return nullptr;
 
     return tmp;
 }
 
 std::string Message::compute_password(const std::string& password, const std::string& salt, int iterations, int dkey_lenght){
-
     auto salt_ = HEXtoUnsignedChar(salt);
 
+    if(!salt_) return "";
+
     auto key = new unsigned char[dkey_lenght];
-    PKCS5_PBKDF2_HMAC(password.c_str(), password.length(),
+    int success = PKCS5_PBKDF2_HMAC(password.c_str(), password.length(),
                       salt_, dkey_lenght,
                       iterations, EVP_sha3_512(),
                       dkey_lenght, key);
+
+    if(!success) return "";
 
     auto key_HEX = unsignedCharToHEX(key, dkey_lenght);
 
@@ -286,8 +310,12 @@ std::string Message::compute_password(const std::string& password, const std::st
 }
 
 unsigned char* Message::generate_salt(int salt_length){
+    int success;
     auto salt = new unsigned char[salt_length];
-    RAND_bytes(salt, salt_length);
+    success = RAND_bytes(salt, salt_length);
 
-    return salt;
+    if(!success)
+        return nullptr;
+    else
+        return salt;
 }

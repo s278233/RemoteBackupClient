@@ -16,6 +16,7 @@ std::map<std::string, std::string> FileWatcher::paths_;
 
 
 std::string fileHash(const std::string& file){
+    int success;
     unsigned char tmp[SHA256_DIGEST_LENGTH];
     SHA256_CTX sha256;
     std::ifstream ifs;
@@ -26,20 +27,21 @@ std::string fileHash(const std::string& file){
     while(!ifs.eof()) {
         ifs.read(buffer.data(), CHUNK_SIZE);
         size_t size= ifs.gcount();
-        SHA256_Init(&sha256);
-        SHA256_Update(&sha256, buffer.data(), size);
+        success = SHA256_Init(&sha256);
+        if(!success) break;
+        success = SHA256_Update(&sha256, buffer.data(), size);
+        if(!success) break;
     }
-    SHA256_Final(tmp, &sha256);
+
     ifs.close();
 
+    success = SHA256_Final(tmp, &sha256);
 
+    if(!success) {
+        return "";
+    }
 
-    //Conversione da unisgned char a string
-    char hash_[2*SHA256_DIGEST_LENGTH+1];
-    hash_[2*SHA256_DIGEST_LENGTH] = 0;
-    for (int i = 0; i < SHA256_DIGEST_LENGTH; i++)
-        sprintf(hash_+i*2, "%02x", tmp[i]);
-    return std::string(hash_);
+    return Message::unsignedCharToHEX(tmp, SHA256_DIGEST_LENGTH);
 }
 
 FileWatcher::FileWatcher(const std::string& path_to_watch, std::chrono::duration<int, std::milli> delay, std::atomic_bool& running_) : path_to_watch{path_to_watch}, delay{delay}, running_(running_){
