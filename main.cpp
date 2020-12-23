@@ -8,7 +8,10 @@
 
 #define RECONN_DELAY 5
 
-#define CHUNK_SIZE 1024
+#define CHUNK_SIZE  1024
+
+#define ITERATIONS  10001
+#define KEY_LENGTH  61
 
 using namespace boost::filesystem;
 using namespace boost::archive;
@@ -140,11 +143,9 @@ void FileUploaderDispatcherThread(){
             upload_pool.clear();
             SafeCout::safe_cout("FileUploader Thread terminato");
     }catch (boost::system::system_error const &e) {
-        SafeCout::safe_cout("FileUploader exception: ", e.what());
-        if ((e.code() == boost::asio::error::eof) || (e.code() == boost::asio::error::connection_reset)) {
+        SafeCout::safe_cout("FileUploader connection exception: ", e.what());
             upload_pool.clear();
             reconnection_cv.notify_one();
-        }
     } catch (const std::runtime_error &e) {
         SafeCout::safe_cout("FileUploader exception: ", e.what());
     }
@@ -220,11 +221,9 @@ void FileDownloaderDispatcherThread(){
         download_pool.clear();
         SafeCout::safe_cout("FileDownloader Thread terminato");
     } catch (boost::system::system_error const &e) {
-        SafeCout::safe_cout("FileDownloader exception: ", e.what());
-        if ((e.code() == boost::asio::error::eof) || (e.code() == boost::asio::error::connection_reset)) {
+        SafeCout::safe_cout("FileDownloader connection exception: ", e.what());
             download_pool.clear();
             reconnection_cv.notify_one();
-        }
     }catch (const std::runtime_error &e) {
         SafeCout::safe_cout("FileDownloader exception: ", e.what());
     }
@@ -266,10 +265,8 @@ void ReceiverThread(){
     }
         SafeCout::safe_cout("Receiver Thread terminato");
     } catch (boost::system::system_error const &e) {
-        SafeCout::safe_cout("Receiver exception: ", e.what());
-        if ((e.code() == boost::asio::error::eof) || (e.code() == boost::asio::error::connection_reset)) {
+        SafeCout::safe_cout("Receiver connection exception: ", e.what());
             reconnection_cv.notify_one();
-        }
     }catch (const std::runtime_error &e) {
         SafeCout::safe_cout("Receiver exception: ", e.what());
     }
@@ -314,25 +311,23 @@ int main(int argc, char* argv[])
     boost::system::error_code ec;
     Message message;
 
-    //Dati di autenticazione
+    //Dati di autenticazione (WARNING!: per motivi di debug il sale è identico per tutti i client)
     auto username = std::string(argv[3]);
     auto password = std::string(argv[4]);
-    auto auth_data = std::pair<std::string, std::string>(username, password);
-
+    std::string salt = "1238e37cc78ea0ad4a2d44ecf4b5f89919a72f76f1d097ca860689c96ea1347f210afca88c437344fc69ffd90936c979b822af9b0ee284855aa80ddda3";
+    auto auth_data = std::pair<std::string, std::string>(username, Message::compute_password(password, salt, ITERATIONS, KEY_LENGTH));
 
     //Dati di connessione
     address dst_ip;
     int dst_port;
 
-
+    //Controllo parametri programma
     try {
         auto ip = std::string(argv[1]);
         dst_ip = ip::make_address(ip);
     } catch (boost::system::system_error const &e) {
         throw std::runtime_error("Invalid IP");
     }
-
-    //Controlo parametri programma
     try {
         auto port = std::string(argv[2]);
         dst_port = std::atoi(port.c_str());
@@ -359,15 +354,15 @@ int main(int argc, char* argv[])
 
     SafeCout::safe_cout("FileWatcher inizializzazione...");
 
-        //Inizializzo il filewatcher (viene effettuato un primo controllo all'avvio sui file)
-        FileWatcher fw{"../" + username, std::chrono::milliseconds(5000), running};//5 sec of delay
+    //Inizializzo il filewatcher (viene effettuato un primo controllo all'avvio sui file)
+       FileWatcher fw{"../" + username, std::chrono::milliseconds(5000), running};//5 sec di delay
 
     SafeCout::safe_cout("FileWatcher inizializzato");
 
-        //Inizializzo fileList da inviare
-        auto fileListW = FileWatcher::getPaths();
-        auto fileListMessage = Message(fileListW);
-        std::optional<std::map<std::string, std::string>> fileListR;
+    //Inizializzo fileList da inviare
+    auto fileListW = FileWatcher::getPaths();
+    auto fileListMessage = Message(fileListW);
+    std::optional<std::map<std::string, std::string>> fileListR;
 
         while(true) {
 
@@ -393,6 +388,7 @@ int main(int argc, char* argv[])
                 socket_->set_verify_callback(verify_certificate);
             }
 
+
         //Autenticazione(two-way)
 
         SafeCout::safe_cout("Autenticazione...");
@@ -401,7 +397,7 @@ int main(int argc, char* argv[])
 
             //REQ
             message.syncRead(socket_wptr);
-            if (message.getType() != AUTH_REQ) throw std::runtime_error("Handshake Error!");
+            if (message.getType() != AUTH_REQ) throw std::runtime_error("Auth Error!");
 
             //RES
             auto authMessage = Message(auth_data);
@@ -412,19 +408,20 @@ int main(int argc, char* argv[])
             message.syncRead(socket_wptr);
             fileListR = message.extractFileList();
 
-            if(!fileListR.has_value()) throw std::runtime_error("Error FileList synchronization!");
+            if(!fileListR.has_value()){
+                std::cerr<<"Error FileList synchronization!"<<std::endl;
+                return 1;
+            }
 
         } catch (boost::system::system_error const &e) {
-            SafeCout::safe_cout(e.what());
-            throw std::runtime_error("Handshake Error!");
+            throw std::runtime_error("Wrong Username/Password");
 
         } catch (const std::runtime_error &e) {
-            SafeCout::safe_cout(e.what());
             throw std::runtime_error("Handshake Error!");
         }
 
 
-            SafeCout::safe_cout("Autenticazione riuscita");
+        SafeCout::safe_cout("Autenticazione riuscita");
 
         //Inizializzo il thread che gestisce il FileWatcher
         std::thread fwt(FileWatcherThread, fw);
@@ -471,7 +468,7 @@ int main(int argc, char* argv[])
             socket_->set_verify_mode(boost::asio::ssl::verify_peer);
             socket_->set_verify_callback(verify_certificate);
             break;
-        }
+        };
     }
     return 0;
 }

@@ -232,19 +232,59 @@ void Message::hashData(){
 
     if(this->data.empty()) return;
 
-    unsigned char tmp[SHA256_DIGEST_LENGTH];
+    unsigned char hash_[SHA256_DIGEST_LENGTH];
 
     //Calcolo hash
     SHA256_CTX sha256;
     SHA256_Init(&sha256);
     SHA256_Update(&sha256, this->data.data(), this->data.size());
-    SHA256_Final(tmp, &sha256);
+    SHA256_Final(hash_, &sha256);
 
-    //Conversione da unisgned char a string
-    char hash_[2*SHA256_DIGEST_LENGTH+1];
-    hash_[2*SHA256_DIGEST_LENGTH] = 0;
-    for (int i = 0; i < SHA256_DIGEST_LENGTH; i++)
-        sprintf(hash_+i*2, "%02x", tmp[i]);
 
-    this->hash = std::string(hash_);
+    this->hash = unsignedCharToHEX(hash_, SHA256_DIGEST_LENGTH);
+}
+
+std::string Message::unsignedCharToHEX(unsigned char* src, size_t src_length){
+    char tmp[2*src_length+1];
+    tmp[2*src_length] = 0;
+    for (int i = 0; i < src_length; i++)
+        sprintf(tmp+i*2, "%02x", src[i]);
+
+    return std::string(tmp);
+}
+
+unsigned char* Message::HEXtoUnsignedChar(const std::string& src){
+
+    auto tmp= new unsigned char[src.length()/2]{0};
+    unsigned int number = 0;
+
+    for(int i=0, j = 0;i<src.length();i+=2, j++) {
+        sscanf(&src.c_str()[i], "%02x", &number);
+        tmp[j] = (unsigned char) number;
+    }
+
+    return tmp;
+}
+
+std::string Message::compute_password(const std::string& password, const std::string& salt, int iterations, int dkey_lenght){
+
+    auto salt_ = HEXtoUnsignedChar(salt);
+
+    auto key = new unsigned char[dkey_lenght];
+    PKCS5_PBKDF2_HMAC(password.c_str(), password.length(),
+                      salt_, dkey_lenght,
+                      iterations, EVP_sha3_512(),
+                      dkey_lenght, key);
+
+    auto key_HEX = unsignedCharToHEX(key, dkey_lenght);
+
+    return key_HEX;
+
+}
+
+unsigned char* Message::generate_salt(int salt_length){
+    auto salt = new unsigned char[salt_length];
+    RAND_bytes(salt, salt_length);
+
+    return salt;
 }
