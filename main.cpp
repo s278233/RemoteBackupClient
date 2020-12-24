@@ -7,7 +7,7 @@
 
 #define RECONN_DELAY 5
 
-#define CHUNK_SIZE  1024 * 1024
+#define CHUNK_SIZE  1452
 
 #define MAX_DOWNLOAD_POOL   100
 
@@ -361,7 +361,7 @@ int main(int argc, char* argv[])
     SafeCout::safe_cout("FileWatcher inizializzazione...");
 
     //Inizializzo il filewatcher (viene effettuato un primo controllo all'avvio sui file)
-    FileWatcher fw{"../" + username, std::chrono::milliseconds(5000), running};//5 sec di delay
+    FileWatcher fw{"../" + username, std::chrono::milliseconds(5000), CHUNK_SIZE, running};//5 sec di delay
 
     SafeCout::safe_cout("FileWatcher inizializzato");
 

@@ -42,6 +42,9 @@
 #include <boost/archive/text_iarchive.hpp>
 #include <boost/weak_ptr.hpp>
 #include <boost/asio/ssl.hpp>
+#include <cstring>
+#include <sstream>
+#include <iomanip>
 
 
 using namespace boost::archive;
@@ -64,7 +67,11 @@ class Message {
 
 public:
 
-    static std::string unsignedCharToHEX(unsigned char *src, size_t src_length);  //Conversione da unsigned char* a string
+    Message(const Message& m);  //Costruttore di copia
+    Message(Message &&src) noexcept;    //Costruttore di movimento
+    Message& operator= (const Message &m);  //Overload operatore di assegnazione tramite copia
+    Message& operator=(Message&& src) noexcept ;    //Overload operatore di assegnazione tramite movimento
+    virtual ~Message(); //Distruttore
 
     Message();  //Costruttore per messaggio vuoto
 
@@ -76,6 +83,8 @@ public:
 
     explicit Message(const std::map<std::string, std::string>& paths);    //Costruttore per mappa <file/directory, hash>
 
+
+    friend void swap(Message& src, Message& dst);   //SWAP
 
     friend std::ostream& operator<<(std::ostream &out, Message& m); //ToString
 
@@ -94,6 +103,8 @@ public:
     void syncRead(const boost::weak_ptr<ssl::stream<tcp::socket>> &socket_wptr);    //Lettura sincrona del messaggio da boost_socket
 
     void syncWrite(const boost::weak_ptr<ssl::stream<tcp::socket>> &socket_wptr) const;  //Scrittura sincrona del messaggio su boost_socket
+
+    static std::string unsignedCharToHEX(unsigned char *src, size_t src_length);  //Conversione da unsigned char* a string
 
     static std::string compute_password(const std::string& password, const std::string& salt, int iterations, int dkey_lenght); //PBKDF2
 

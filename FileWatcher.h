@@ -14,6 +14,11 @@
 #include <openssl/sha.h>
 #include <atomic>
 #include <mutex>
+#include <cstdio>
+#include <cstring>
+#include <map>
+#include <iostream>
+#include "SafeCout.h"
 #include "Message.h"
 
 #define TMP_PLACEHOLDER "tmpFileDownload.tmp"
@@ -25,17 +30,18 @@ enum class FileStatus {created, modified, erasedFile, erasedDir};
  class FileWatcher {
      static std::map<std::string, std::string> paths_;
      static std::mutex path_mtx;
- public:
-     static const std::map<std::string, std::string> &getPaths() ;
-
- private:
      std::string path_to_watch;
      std::chrono::duration<int, std::milli> delay;
+     static size_t chunk_size;
      std::atomic_bool& running_;
+
+     static std::string fileHash(const std::string &file);
  public:
-     FileWatcher(const std::string& path_to_watch, std::chrono::duration<int, std::milli> delay, std::atomic_bool& running);
+     FileWatcher(const std::string& path_to_watch, std::chrono::duration<int, std::milli> delay, size_t chunk_size, std::atomic_bool& running);
      void start(const std::function<void (std::string, FileStatus)> &action);
+     static const std::map<std::string, std::string> &getPaths() ;
      static void addPath(const std::string &path, const std::string &tmp_path);
+
  };
 
 

@@ -1,30 +1,23 @@
 //
 // Created by lucio on 03/12/2020.
 //
-#include <cstdio>
-#include <cstring>
-#include <map>
-#include <iostream>
 #include "FileWatcher.h"
-#include "SafeCout.h"
-
-#define CHUNK_SIZE 1024
 
 std::mutex FileWatcher::path_mtx;
 std::map<std::string, std::string> FileWatcher::paths_;
+size_t FileWatcher::chunk_size;
 
-
-std::string fileHash(const std::string& file){
+std::string FileWatcher::fileHash(const std::string& file){
     int success;
     unsigned char tmp[SHA256_DIGEST_LENGTH];
     SHA256_CTX sha256;
     std::ifstream ifs;
-    std::vector<char> buffer(CHUNK_SIZE);
+    std::vector<char> buffer(chunk_size);
 
     //Lettura + hash chunk file
     ifs.open(file, std::ios::binary);
     while(!ifs.eof()) {
-        ifs.read(buffer.data(), CHUNK_SIZE);
+        ifs.read(buffer.data(), chunk_size);
         size_t size= ifs.gcount();
         success = SHA256_Init(&sha256);
         if(!success) break;
@@ -47,7 +40,9 @@ std::string fileHash(const std::string& file){
     return Message::unsignedCharToHEX(tmp, SHA256_DIGEST_LENGTH);
 }
 
-FileWatcher::FileWatcher(const std::string& path_to_watch, std::chrono::duration<int, std::milli> delay, std::atomic_bool& running_) : path_to_watch{path_to_watch}, delay{delay}, running_(running_){
+FileWatcher::FileWatcher(const std::string& path_to_watch, std::chrono::duration<int, std::milli> delay, size_t chunk_size_, std::atomic_bool& running_) : path_to_watch{path_to_watch}, delay{delay}, running_(running_){
+
+    chunk_size = chunk_size_;
 
     //Creo la cartella se non esiste
     if(!std::filesystem::exists(path_to_watch))

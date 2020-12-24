@@ -3,14 +3,41 @@
 //
 
 #include "Message.h"
-#include <cstring>
-#include <sstream>
-#include <iomanip>
+
 
 std::mutex Message::syncR_mtx;
 std::mutex Message::syncW_mtx;
 
 //COSTRUTTORI, OVERLOADS E DISTRUTTORE
+
+//Costruttore di copia
+Message::Message(const Message &m) {
+    this->type = m.type;
+    this->data = m.data;
+    this->hash= m.hash;
+}
+
+//Costruttore di movimento
+Message::Message(Message &&src) noexcept : type(INVALID){
+    this->hash.clear();
+    swap(*this, src);
+}
+
+//Overload operatore di assegnazione tramite copia
+Message &Message::operator=(const Message &src) {
+    Message copy(src);
+    swap(*this, copy);
+    return *this;
+}
+
+//Overload operatore di assegnazione tramite movimento
+Message &Message::operator=(Message&& src) noexcept{
+    swap(*this, src);
+    return *this;
+}
+
+//Distruttore
+Message::~Message() = default;
 
 //Costruttore per messaggio vuoto
 Message::Message() {
@@ -57,6 +84,13 @@ Message::Message(const std::map<std::string, std::string>& fileList) {
 
 
 //FUNZIONI DI SUPPORTO PUBBLICHE
+
+//SWAP
+void swap(Message &src, Message &dst) {
+    std::swap(src.type, dst.type);
+    std::swap(src.data, dst.data);
+    std::swap(src.hash, dst.hash);
+}
 
 //ToString
 std::ostream& operator<<(std::ostream &out, Message& m)
