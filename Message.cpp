@@ -7,8 +7,8 @@
 #include <sstream>
 #include <iomanip>
 
-std::mutex Message::asyncR_mtx;
-std::mutex Message::asyncW_mtx;
+std::mutex Message::syncR_mtx;
+std::mutex Message::syncW_mtx;
 
 //COSTRUTTORI, OVERLOADS E DISTRUTTORE
 
@@ -57,13 +57,6 @@ Message::Message(const std::map<std::string, std::string>& fileList) {
 
 
 //FUNZIONI DI SUPPORTO PUBBLICHE
-
-//SWAP
-void swap(Message &src, Message &dst) {
-    std::swap(src.type, dst.type);
-    std::swap(src.data, dst.data);
-    std::swap(src.hash, dst.hash);
-}
 
 //ToString
 std::ostream& operator<<(std::ostream &out, Message& m)
@@ -164,7 +157,7 @@ std::optional<std::map<std::string, std::string>> Message::extractFileList(){
 //Lettura sincrona del messaggio da boost_socket
 void Message::syncRead(const boost::weak_ptr<ssl::stream<tcp::socket>>& socket_wptr){
 
-    std::lock_guard<std::mutex> lg(asyncR_mtx);
+    std::lock_guard<std::mutex> lg(syncR_mtx);
 
     boost::system::error_code ec;
 
@@ -198,7 +191,7 @@ void Message::syncRead(const boost::weak_ptr<ssl::stream<tcp::socket>>& socket_w
 //Scrittura sincrona del messaggio su boost_socket
 void Message::syncWrite(const boost::weak_ptr<ssl::stream<tcp::socket>>& socket_wptr) const{
 
-    std::lock_guard<std::mutex> lg(asyncW_mtx);
+    std::lock_guard<std::mutex> lg(syncW_mtx);
 
     boost::system::error_code ec;
 

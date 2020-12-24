@@ -8,18 +8,40 @@
 
 #include <iostream>
 #include <mutex>
+#include <fstream>
 
+constexpr bool debug = true;
+
+static std::mutex cout_mtx;
+static bool firstUse = true;
+static std::ofstream ofs_sc;
+static std::string log_path;
 
 class SafeCout {
-    static std::mutex cout_mtx;
 
 public:
     template<typename... T, typename U>
     static void safe_cout(const U &arg, const T &... args) {
         std::lock_guard<std::mutex> lg(cout_mtx);
+        if(debug) {
+            if (firstUse) {
+                firstUse = false;
+                ofs_sc.open(log_path, std::ios::binary);
+            } else ofs_sc.open(log_path, std::ios::binary | std::ios_base::app);
+        }
+
         inner_safe_cout(arg, args...);
         std::cout << std::endl;
+        if(debug) {
+            ofs_sc << std::endl;
+            ofs_sc.close();
+        }
     }
+
+    static void set_log_path(const std::string& log_path_){
+        log_path = log_path_;
+    }
+
 
 private:
     template<typename... T, typename U>
@@ -31,6 +53,8 @@ private:
     template<typename T>
     static void inner_safe_cout(const T &arg) {
         std::cout << arg;
+        if(debug)
+        ofs_sc << arg;
     }
 
 };

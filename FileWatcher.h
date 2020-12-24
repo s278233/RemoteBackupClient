@@ -16,6 +16,8 @@
 #include <mutex>
 #include "Message.h"
 
+#define TMP_PLACEHOLDER "tmpFileDownload.tmp"
+
 
 // Define available file changes
 enum class FileStatus {created, modified, erasedFile, erasedDir};
@@ -33,7 +35,7 @@ enum class FileStatus {created, modified, erasedFile, erasedDir};
  public:
      FileWatcher(const std::string& path_to_watch, std::chrono::duration<int, std::milli> delay, std::atomic_bool& running);
      void start(const std::function<void (std::string, FileStatus)> &action);
-     static void addPath(const std::string& path);
+     static void addPath(const std::string &path, const std::string &tmp_path);
  };
 
 

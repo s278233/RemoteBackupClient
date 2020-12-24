@@ -53,8 +53,8 @@ class Message {
     std::vector<char> data{};
     std::string hash;
 
-    static std::mutex asyncR_mtx;
-    static std::mutex asyncW_mtx;
+    static std::mutex syncR_mtx;
+    static std::mutex syncW_mtx;
 
 
     void hashData();    //Calcolo digest
@@ -76,8 +76,6 @@ public:
 
     explicit Message(const std::map<std::string, std::string>& paths);    //Costruttore per mappa <file/directory, hash>
 
-
-    friend void swap(Message& src, Message& dst);   //SWAP
 
     friend std::ostream& operator<<(std::ostream &out, Message& m); //ToString
 

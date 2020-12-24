@@ -1,14 +1,16 @@
 #include <boost/filesystem.hpp>
 #include <boost/asio/ssl.hpp>
 #include <iostream>
-#include <csignal>
 #include "Message.h"
 #include "FileWatcher.h"
 #include "SafeCout.h"
 
 #define RECONN_DELAY 5
 
-#define CHUNK_SIZE  1024
+#define CHUNK_SIZE  1024 * 1024
+
+#define MAX_DOWNLOAD_POOL   100
+
 
 #define ITERATIONS  10001
 #define KEY_LENGTH  61
@@ -35,9 +37,6 @@ std::list<Message> download_pool;
 
 std::list<std::pair<std::string,FileStatus>> upload_pool;
 
-std::list<std::string> path_ignore_pool;
-
-
 void checkDifferences(const std::map<std::string, std::string>& src,std::map<std::string, std::string>& dst){
     for(const auto& file:src)
         if(!dst.contains(file.first) || (dst.contains(file.first) && file.second != dst[file.first])) {
@@ -55,11 +54,11 @@ void FileWatcherThread(FileWatcher fw){
 
     fw.start([] (const std::string& path_to_watch, FileStatus status) -> void {
         if(!running.load()) return;
-        //Processo solo i file che non sono in download e i file/dir non corrotte
+        //Processo solo i file che non sono in download e i file/dir non corrotti
         if((!std::filesystem::is_regular_file(path_to_watch) && !std::filesystem::is_directory(path_to_watch))
         && status != FileStatus::erasedFile && status != FileStatus::erasedDir
-        && (!(std::find(path_ignore_pool.begin(), path_ignore_pool.end(), path_to_watch) != path_ignore_pool.end())
-        )) {
+        || (path_to_watch.find(TMP_PLACEHOLDER) != std::string::npos)
+        ) {
             return;
         }
 
@@ -98,7 +97,7 @@ void FileUploaderDispatcherThread(){
     std::vector<char> buffer( CHUNK_SIZE );
     size_t size;
     Message message;
-    std::string file;
+    std::string path;
 
     while(!running.load());
 
@@ -110,20 +109,20 @@ void FileUploaderDispatcherThread(){
                 return (!upload_pool.empty() || !running.load());
             });
             if (!running.load()) break;
-            file = upload_pool.back().first;
+            path = upload_pool.back().first;
 
-            SafeCout::safe_cout("uploading ", file);
+            SafeCout::safe_cout("uploading ", path);
 
             //Upload cartella
-            if (std::filesystem::is_directory(file)) {
-                message = Message(DIR, std::vector<char>(file.begin(), file.end()));
+            if (std::filesystem::is_directory(path)) {
+                message = Message(DIR, std::vector<char>(path.begin(), path.end()));
                 message.syncWrite(socket_wptr);
             } else {
                 //Upload file
-                ifs.open(file, std::ios::binary);
-                message = Message(FILE_START, std::vector<char>(file.begin(), file.end()));
+                ifs.open(path, std::ios::binary);
+                message = Message(FILE_START, std::vector<char>(path.begin(), path.end()));
                 message.syncWrite(socket_wptr);
-                if (std::filesystem::file_size(file) != 0)
+                if (std::filesystem::file_size(path) != 0)
                     while (!ifs.eof()) {
                         ifs.read(buffer.data(), buffer.size());
                         size = ifs.gcount();
@@ -138,6 +137,7 @@ void FileUploaderDispatcherThread(){
                 message = Message(FILE_END);
                 message.syncWrite(socket_wptr);
             }
+            SafeCout::safe_cout("uploaded ", path);
             upload_pool.pop_back();
         }
             upload_pool.clear();
@@ -146,7 +146,7 @@ void FileUploaderDispatcherThread(){
         SafeCout::safe_cout("FileUploader connection exception: ", e.what());
             upload_pool.clear();
             reconnection_cv.notify_one();
-    } catch (const std::runtime_error &e) {
+    } catch (const std::exception &e) {
         SafeCout::safe_cout("FileUploader exception: ", e.what());
     }
 
@@ -156,6 +156,8 @@ void FileDownloaderDispatcherThread(){
     Message message;
     std::ofstream ofs;
     std::unique_lock<std::mutex> lck(download_mtx);
+    std::string path;
+    std::string tmp_path;
 
     while(!running.load());
 
@@ -172,28 +174,36 @@ void FileDownloaderDispatcherThread(){
             message = download_pool.back();
             download_pool.pop_back();
 
-            std::string path(message.getData().begin(), message.getData().end());
+            path = std::string(message.getData().begin(), message.getData().end());
 
             SafeCout::safe_cout("downloading ", path);
 
             if(message.getType() == DIR) {
-                FileWatcher::addPath(path);
+                FileWatcher::addPath(path, "");
                 std::filesystem::create_directory(path);
+                SafeCout::safe_cout("downloaded ", path);
             }
 
             else if (message.getType() != FILE_START) {
                 SafeCout::safe_cout("Error File Download");
 
             } else {
-                path_ignore_pool.push_front(path);
 
-                ofs.open(path, std::ios::binary);
+                tmp_path = path.substr(0, path.find_last_of('/') +1 ) + TMP_PLACEHOLDER;
+
+                ofs.open(tmp_path, std::ios::binary);
 
                 while (true) {
 
                     download_cv.wait(lck, [](){
-                        return !download_pool.empty();
+                        return (!download_pool.empty() || !running.load());
                     });
+
+                    if(!running.load()){
+                        ofs.close();
+                        std::remove(tmp_path.c_str());
+                        break;
+                    }
 
                     message = download_pool.back();
 
@@ -201,15 +211,15 @@ void FileDownloaderDispatcherThread(){
 
                     if (message.getType() == FILE_END) {
                         ofs.close();
-                        FileWatcher::addPath(path);
-                        path_ignore_pool.pop_back();
+                        FileWatcher::addPath(path, tmp_path);
+                        SafeCout::safe_cout("downloaded ", path);
                         break;
                     }
 
                     if (message.getType() != FILE_DATA) {
                         SafeCout::safe_cout("Error File Download");
                         ofs.close();
-                        std::remove(path.c_str());
+                        std::remove(tmp_path.c_str());
                         break;
                     }
 
@@ -222,9 +232,13 @@ void FileDownloaderDispatcherThread(){
         SafeCout::safe_cout("FileDownloader Thread terminato");
     } catch (boost::system::system_error const &e) {
         SafeCout::safe_cout("FileDownloader connection exception: ", e.what());
-            download_pool.clear();
-            reconnection_cv.notify_one();
-    }catch (const std::runtime_error &e) {
+        ofs.close();
+        std::remove(tmp_path.c_str());
+        download_pool.clear();
+        reconnection_cv.notify_one();
+    }catch (const std::exception &e) {
+        ofs.close();
+        std::remove(tmp_path.c_str());
         SafeCout::safe_cout("FileDownloader exception: ", e.what());
     }
 
@@ -240,6 +254,9 @@ void ReceiverThread(){
 
     try {
     while(running.load()){
+
+        while(download_pool.size() > MAX_DOWNLOAD_POOL)
+        ;
                 //Ricezione messaggio
                 message.syncRead(socket_wptr);
                 //Controllo tipo
@@ -267,7 +284,7 @@ void ReceiverThread(){
     } catch (boost::system::system_error const &e) {
         SafeCout::safe_cout("Receiver connection exception: ", e.what());
             reconnection_cv.notify_one();
-    }catch (const std::runtime_error &e) {
+    }catch (const std::exception &e) {
         SafeCout::safe_cout("Receiver exception: ", e.what());
     }
 
@@ -301,6 +318,7 @@ int main(int argc, char* argv[])
 
     //Dati di autenticazione (WARNING!: per motivi di debug il sale è identico per tutti i client)
     auto username = std::string(argv[3]);
+    SafeCout::set_log_path("../" + username + "_log.txt");
     auto password = std::string(argv[4]);
     std::string salt = "1238e37cc78ea0ad4a2d44ecf4b5f89919a72f76f1d097ca860689c96ea1347f210afca88c437344fc69ffd90936c979b822af9b0ee284855aa80ddda3";
     auto auth_data = std::pair<std::string, std::string>(username, Message::compute_password(password, salt, ITERATIONS, KEY_LENGTH));
@@ -324,7 +342,7 @@ int main(int argc, char* argv[])
             return 1;
         }
 
-    } catch (const std::runtime_error &e) {
+    } catch (const std::exception &e) {
         throw std::runtime_error("Invalid Port");
     }
 
@@ -383,7 +401,10 @@ int main(int argc, char* argv[])
 
             //REQ
             message.syncRead(socket_wptr);
-            if (message.getType() != AUTH_REQ) throw std::runtime_error("Auth Error!");
+            if (message.getType() != AUTH_REQ){
+                std::cerr<<"Auth Error!"<<std::endl;
+                return 1;
+            }
 
             //RES
             auto authMessage = Message(auth_data);
@@ -400,10 +421,11 @@ int main(int argc, char* argv[])
             }
 
         } catch (boost::system::system_error const &e) {
-            throw std::runtime_error("Wrong Username/Password");
-
-        } catch (const std::runtime_error &e) {
-            throw std::runtime_error("Handshake Error!");
+            std::cerr<<"Wrong Username/Password!"<<std::endl;
+            return 1;
+        } catch (const std::exception &e) {
+            std::cerr<<"Handshake error!"<<std::endl;
+            return 1;
         }
 
 
@@ -454,7 +476,8 @@ int main(int argc, char* argv[])
             socket_->set_verify_mode(boost::asio::ssl::verify_peer);
             socket_->set_verify_callback(verify_certificate);
             break;
-        };
+        }
+        ;
     }
     return 0;
 }

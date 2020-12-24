@@ -3,7 +3,6 @@
 //
 #include <cstdio>
 #include <cstring>
-#include <fstream>
 #include <map>
 #include <iostream>
 #include "FileWatcher.h"
@@ -56,15 +55,18 @@ FileWatcher::FileWatcher(const std::string& path_to_watch, std::chrono::duration
 
     //Genero una map tra il path dei file e l'hash
     for(auto &file : std::filesystem::recursive_directory_iterator(path_to_watch)) {
-        if(file.is_regular_file())
+        if (file.path().string().find(TMP_PLACEHOLDER) != std::string::npos)
+            std::remove(file.path().string().c_str());
+        else if(file.is_regular_file())
             paths_[file.path().string()] = fileHash(file.path().string());
         else paths_[file.path().string()] = "";
 }
 }
 
-// Monitor "path_to_watch" for changes and in case of a change execute the user supplied "action" function
+// Monitoro Creazione/Modifica/Cancellazione File/Directory
 void FileWatcher::start(const std::function<void (std::string, FileStatus)> &action) {
     std::string recomputedHash;
+
     while(running_.load()) {
         //Dorme per un tempo pari a delay
         std::this_thread::sleep_for(delay);
@@ -127,10 +129,13 @@ const std::map<std::string, std::string> &FileWatcher::getPaths() {
     return paths_;
 }
 
-void FileWatcher::addPath(const std::string &path) {
+void FileWatcher::addPath(const std::string &path, const std::string &tmp_path) {
     std::lock_guard<std::mutex> lg(path_mtx);
-    if(std::filesystem::is_regular_file(path))
+
+    if(std::filesystem::is_regular_file(tmp_path)) {
+        std::rename(tmp_path.c_str(), path.c_str());
         paths_[path] = fileHash(path);
+    }
     else paths_[path] = "";
 }
 
