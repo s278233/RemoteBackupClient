@@ -21,6 +21,8 @@ using namespace boost::asio;
 using namespace boost::asio::ip;
 using namespace std::placeholders;
 
+std::condition_variable limit_cv;
+
 boost::weak_ptr<ssl::stream<tcp::socket>> socket_wptr;
 std::mutex reconnection_mtx;
 std::condition_variable reconnection_cv;
@@ -154,8 +156,8 @@ void FileUploaderDispatcherThread(){
 
 void FileDownloaderDispatcherThread(){
     Message message;
+    std::unique_lock<std::mutex> lck(download_mtx, std::defer_lock);
     std::ofstream ofs;
-    std::unique_lock<std::mutex> lck(download_mtx);
     std::string path;
     std::string tmp_path;
 
@@ -166,13 +168,20 @@ void FileDownloaderDispatcherThread(){
     try {
 
         while (running.load()) {
-            download_cv.wait(lck, [](){
+
+            lck.lock();
+
+            download_cv.wait(lck, []() {
                 return (!download_pool.empty() || !running.load());
             });
-            if(!running.load()) break;
+            if (!running.load()) break;
 
             message = download_pool.back();
             download_pool.pop_back();
+
+            lck.unlock();
+
+            limit_cv.notify_one();
 
             path = std::string(message.getData().begin(), message.getData().end());
 
@@ -195,6 +204,8 @@ void FileDownloaderDispatcherThread(){
 
                 while (true) {
 
+                    lck.lock();
+
                     download_cv.wait(lck, [](){
                         return (!download_pool.empty() || !running.load());
                     });
@@ -208,6 +219,10 @@ void FileDownloaderDispatcherThread(){
                     message = download_pool.back();
 
                     download_pool.pop_back();
+
+                    lck.unlock();
+
+                    limit_cv.notify_one();
 
                     if (message.getType() == FILE_END) {
                         ofs.close();
@@ -247,6 +262,7 @@ void FileDownloaderDispatcherThread(){
 
 void ReceiverThread(){
     Message message;
+    std::unique_lock<std::mutex> lck(download_mtx, std::defer_lock);
 
     while(!running.load());
 
@@ -255,8 +271,16 @@ void ReceiverThread(){
     try {
     while(running.load()){
 
-        while(download_pool.size() > MAX_DOWNLOAD_POOL)
-        ;
+        lck.lock();
+
+        limit_cv.wait(lck, [](){
+            return (download_pool.size() < MAX_DOWNLOAD_POOL || !running.load());
+        });
+
+        SafeCout::safe_cout(download_pool.size());
+
+        lck.unlock();
+
                 //Ricezione messaggio
                 message.syncRead(socket_wptr);
                 //Controllo tipo
@@ -273,7 +297,9 @@ void ReceiverThread(){
             case FILE_START:
             case FILE_DATA:
             case FILE_END:
+                lck.lock();
                 download_pool.push_front(message);
+                lck.unlock();
                 download_cv.notify_one();
             break;
             default: SafeCout::safe_cout("Message type not recognized!");
