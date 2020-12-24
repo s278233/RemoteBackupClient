@@ -3,7 +3,6 @@
 #include <iostream>
 #include "Message.h"
 #include "FileWatcher.h"
-#include "SafeCout.h"
 
 #define RECONN_DELAY 5
 
@@ -94,7 +93,7 @@ void FileWatcherThread(FileWatcher fw){
 }
 
 void FileUploaderDispatcherThread(){
-    std::unique_lock<std::mutex> lck(upload_mtx);
+    std::unique_lock<std::mutex> lck(upload_mtx, std::defer_lock);
     std::ifstream ifs;
     std::vector<char> buffer( CHUNK_SIZE );
     size_t size;
@@ -107,11 +106,17 @@ void FileUploaderDispatcherThread(){
 
     try {
         while (running.load()) {
+
+            lck.lock();
+
             upload_cv.wait(lck, [](){
                 return (!upload_pool.empty() || !running.load());
             });
             if (!running.load()) break;
+
             path = upload_pool.back().first;
+
+            lck.unlock();
 
             SafeCout::safe_cout("uploading ", path);
 
@@ -140,13 +145,19 @@ void FileUploaderDispatcherThread(){
                 message.syncWrite(socket_wptr);
             }
             SafeCout::safe_cout("uploaded ", path);
+            lck.lock();
             upload_pool.pop_back();
+            lck.unlock();
         }
+            lck.lock();
             upload_pool.clear();
+            lck.unlock();
             SafeCout::safe_cout("FileUploader Thread terminato");
     }catch (boost::system::system_error const &e) {
         SafeCout::safe_cout("FileUploader connection exception: ", e.what());
+            lck.lock();
             upload_pool.clear();
+            lck.unlock();
             reconnection_cv.notify_one();
     } catch (const std::exception &e) {
         SafeCout::safe_cout("FileUploader exception: ", e.what());
@@ -277,8 +288,6 @@ void ReceiverThread(){
             return (download_pool.size() < MAX_DOWNLOAD_POOL || !running.load());
         });
 
-        SafeCout::safe_cout(download_pool.size());
-
         lck.unlock();
 
                 //Ricezione messaggio
@@ -387,7 +396,7 @@ int main(int argc, char* argv[])
     SafeCout::safe_cout("FileWatcher inizializzazione...");
 
     //Inizializzo il filewatcher (viene effettuato un primo controllo all'avvio sui file)
-    FileWatcher fw{"../" + username, std::chrono::milliseconds(5000), CHUNK_SIZE, running};//5 sec di delay
+    FileWatcher fw{"../" + username, std::chrono::milliseconds(5000), running};//5 sec di delay
 
     SafeCout::safe_cout("FileWatcher inizializzato");
 

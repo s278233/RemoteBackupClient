@@ -23,6 +23,7 @@
 
 #define TMP_PLACEHOLDER "tmpFileDownload.tmp"
 
+#define HASH_CHUNK_SIZE  1024
 
 // Define available file changes
 enum class FileStatus {created, modified, erasedFile, erasedDir};
@@ -32,12 +33,11 @@ enum class FileStatus {created, modified, erasedFile, erasedDir};
      static std::mutex path_mtx;
      std::string path_to_watch;
      std::chrono::duration<int, std::milli> delay;
-     static size_t chunk_size;
      std::atomic_bool& running_;
 
      static std::string fileHash(const std::string &file);
  public:
-     FileWatcher(const std::string& path_to_watch, std::chrono::duration<int, std::milli> delay, size_t chunk_size, std::atomic_bool& running);
+     FileWatcher(const std::string& path_to_watch, std::chrono::duration<int, std::milli> delay, std::atomic_bool& running);
      void start(const std::function<void (std::string, FileStatus)> &action);
      static const std::map<std::string, std::string> &getPaths() ;
      static void addPath(const std::string &path, const std::string &tmp_path);
