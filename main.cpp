@@ -492,6 +492,7 @@ int main(int argc, char* argv[])
         upload_cv.notify_all();
         limit_cv.notify_all();
 
+        socket_->lowest_layer().cancel();
         socket_->shutdown();
         socket_->lowest_layer().close();
         socket_.reset(new ssl::stream<tcp::socket>(ioc, ctx));
