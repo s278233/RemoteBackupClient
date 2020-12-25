@@ -2,11 +2,14 @@
 // Created by lucio on 01/12/2020.
 //
 
+#include <deque>
+#include <utility>
 #include "Message.h"
 
 
 std::mutex Message::syncR_mtx;
 std::mutex Message::syncW_mtx;
+boost::weak_ptr<ssl::stream<tcp::socket>> Message::socket_wptr;
 
 //COSTRUTTORI, OVERLOADS E DISTRUTTORE
 
@@ -99,8 +102,8 @@ std::ostream& operator<<(std::ostream &out, Message& m)
     if(!m.data.empty()) {
         out << " DATA:" ;
         out<<'"';
-        for (auto it = m.data.begin(); it != m.data.end(); ++it)
-            out << *it;
+        for (char & it : m.data)
+            out << it;
         out<<'"';
     }
     if(!m.hash.empty()) out << " HASH:" << std::quoted(m.hash);
@@ -189,18 +192,16 @@ std::optional<std::map<std::string, std::string>> Message::extractFileList(){
 }
 
 //Lettura sincrona del messaggio da boost_socket
-void Message::syncRead(const boost::weak_ptr<ssl::stream<tcp::socket>>& socket_wptr){
+void Message::syncRead(){
 
     std::lock_guard<std::mutex> lg(syncR_mtx);
-
-    boost::system::error_code ec;
 
     std::vector<char> header(HEADER_LENGTH);
     size_t message_length;
     size_t sizeR;
 
     //Ricezione Header
-    sizeR = boost::asio::read((*socket_wptr.lock()), boost::asio::buffer(header), boost::asio::transfer_exactly(HEADER_LENGTH));
+    sizeR = socket_wptr.lock()->read_some(boost::asio::buffer(header));
 
     if(header.empty() || (!header.empty() && sizeR != header.size()))
         throw std::runtime_error("Broken Header");
@@ -211,7 +212,7 @@ void Message::syncRead(const boost::weak_ptr<ssl::stream<tcp::socket>>& socket_w
 
     //Ricezione Messaggio
     std::vector<char> message(message_length);
-    sizeR = boost::asio::read((*socket_wptr.lock()), boost::asio::buffer(message), boost::asio::transfer_exactly(message_length));
+    sizeR = socket_wptr.lock()->read_some(boost::asio::buffer(message));
 
     if(sizeR != message_length)
         throw std::runtime_error("Broken Message");
@@ -223,11 +224,9 @@ void Message::syncRead(const boost::weak_ptr<ssl::stream<tcp::socket>>& socket_w
 }
 
 //Scrittura sincrona del messaggio su boost_socket
-void Message::syncWrite(const boost::weak_ptr<ssl::stream<tcp::socket>>& socket_wptr) const{
+void Message::syncWrite() const{
 
-    std::lock_guard<std::mutex> lg(syncW_mtx);
-
-    boost::system::error_code ec;
+    std::lock_guard<std::mutex> lg(syncR_mtx);
 
     //Serializzazione messaggio
     std::ostringstream archive_stream;
@@ -243,12 +242,11 @@ void Message::syncWrite(const boost::weak_ptr<ssl::stream<tcp::socket>>& socket_
     size_t sizeW;
 
     //Invio
-    std::vector<boost::asio::const_buffer> buffers;
-    buffers.emplace_back(boost::asio::buffer(outbound_header_));
-    buffers.emplace_back(boost::asio::buffer(outbound_data_));
-    sizeW = boost::asio::write((*socket_wptr.lock()), buffers, boost::asio::transfer_exactly(buffers[0].size() + buffers[1].size()));
+    sizeW = socket_wptr.lock()->write_some(boost::asio::buffer(outbound_header_));
+    if(sizeW != outbound_header_.size()) throw std::runtime_error("Write Error");
 
-    if(sizeW != (buffers[0].size() + buffers[1].size())) throw std::runtime_error("Write Error");
+    sizeW = socket_wptr.lock()->write_some(boost::asio::buffer(outbound_data_));
+    if(sizeW != outbound_data_.size()) throw std::runtime_error("Write Error");
 }
 
 
@@ -345,4 +343,8 @@ unsigned char* Message::generate_salt(int salt_length){
         return nullptr;
     else
         return salt;
+}
+
+void Message::setSocket(boost::weak_ptr<ssl::stream<tcp::socket>> socket_wptr_) {
+socket_wptr = std::move(socket_wptr_);
 }

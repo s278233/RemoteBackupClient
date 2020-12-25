@@ -21,7 +21,6 @@ using namespace std::placeholders;
 
 std::condition_variable limit_cv;
 
-boost::weak_ptr<ssl::stream<tcp::socket>> socket_wptr;
 std::mutex reconnection_mtx;
 std::condition_variable reconnection_cv;
 
@@ -75,11 +74,11 @@ void FileWatcherThread(FileWatcher fw){
                 break;
             case FileStatus::erasedFile:
                 SafeCout::safe_cout("File erased: ", path_to_watch);
-                Message(FILE_DEL, std::vector<char>(path_to_watch.begin(), path_to_watch.end())).syncWrite(socket_wptr);
+                Message(FILE_DEL, std::vector<char>(path_to_watch.begin(), path_to_watch.end())).syncWrite();
                 break;
             case FileStatus::erasedDir:
                 SafeCout::safe_cout("Directory erased: ", path_to_watch);
-                Message(DIR_DEL, std::vector<char>(path_to_watch.begin(), path_to_watch.end())).syncWrite(socket_wptr);
+                Message(DIR_DEL, std::vector<char>(path_to_watch.begin(), path_to_watch.end())).syncWrite();
                 break;
             default:
                 SafeCout::safe_cout("Error! Unknown file status.");
@@ -120,19 +119,19 @@ void FileUploaderDispatcherThread(){
             if (std::filesystem::is_directory(path)) {
                 SafeCout::safe_cout("uploading dir", path);
                 message = Message(DIR, std::vector<char>(path.begin(), path.end()));
-                message.syncWrite(socket_wptr);
+                message.syncWrite();
                 SafeCout::safe_cout("uploaded dir", path);
             } else {
                 //Upload file
                 SafeCout::safe_cout("uploading file", path);
                 ifs.open(path, std::ios::binary);
                 message = Message(FILE_START, std::vector<char>(path.begin(), path.end()));
-                message.syncWrite(socket_wptr);
+                message.syncWrite();
                 if (std::filesystem::file_size(path) != 0)
                     while (!ifs.eof()) {
 
-                        if(!std::filesystem::exists(path)) {
-                            SafeCout::safe_cout("File Erased while uploading!");
+                        if(!std::filesystem::exists(path) || !running.load()) {
+                            SafeCout::safe_cout("Error while uploading file!");
                             break;
                         }
 
@@ -142,14 +141,14 @@ void FileUploaderDispatcherThread(){
                         if (size < CHUNK_SIZE)
                             buffer.resize(size);
                         message = Message(FILE_DATA, buffer);
-                        message.syncWrite(socket_wptr);
+                        message.syncWrite();
                         buffer.clear();
                         std::vector<char>(CHUNK_SIZE).swap(buffer);
                     }
                 ifs.close();
                 message = Message(FILE_END);
-                message.syncWrite(socket_wptr);
-                if(std::filesystem::exists(path))
+                message.syncWrite();
+                if(std::filesystem::exists(path) && running.load())
                 SafeCout::safe_cout("uploaded file", path);
             }
         }
@@ -174,6 +173,7 @@ void FileDownloaderDispatcherThread(){
 
         while (running.load()) {
 
+
             {
                 std::unique_lock<std::mutex> lck(download_mtx);
 
@@ -185,10 +185,10 @@ void FileDownloaderDispatcherThread(){
 
                 message = download_pool.back();
                 download_pool.pop_back();
+
             }
 
             limit_cv.notify_one();
-
 
             path = std::string(message.getData().begin(), message.getData().end());
 
@@ -206,7 +206,8 @@ void FileDownloaderDispatcherThread(){
 
                 SafeCout::safe_cout("downloading file", path);
 
-                tmp_path = path.substr(0, path.find_last_of('/') +1 ) + TMP_PLACEHOLDER;
+                tmp_path = path.substr(0, path.find_last_of('/') +1 );
+                tmp_path+=std::string(TMP_PLACEHOLDER);
 
                 ofs.open(tmp_path, std::ios::binary);
 
@@ -220,18 +221,22 @@ void FileDownloaderDispatcherThread(){
                         });
 
                         if(!running.load()){
+
                             ofs.close();
+
                             std::remove(tmp_path.c_str());
+
                             break;
                         }
 
                         message = download_pool.back();
+
                         download_pool.pop_back();
+
+
                     }
 
                     limit_cv.notify_one();
-
-
 
                     if (message.getType() == FILE_END) {
                         ofs.close();
@@ -239,6 +244,7 @@ void FileDownloaderDispatcherThread(){
                         SafeCout::safe_cout("downloaded file", path);
                         break;
                     }
+
 
                     if (message.getType() != FILE_DATA) {
                         SafeCout::safe_cout("Error File Download");
@@ -285,8 +291,11 @@ void ReceiverThread(){
         }
 
                 //Ricezione messaggio
-                message.syncRead(socket_wptr);
-                //Controllo tipo
+                message.syncRead();
+
+        if (!running.load()) break;
+
+        //Controllo tipo
                 if(message.getType()<-2 || message.getType()>7)
                     SafeCout::safe_cout("Wrong Type!, message discarded");
                 //Controllo integrità
@@ -404,7 +413,7 @@ int main(int argc, char* argv[])
                     boost::asio::connect(socket_->lowest_layer(), endpoints, ec);
                     socket_->handshake(boost::asio::ssl::stream_base::client);
                     SafeCout::safe_cout("Connessione Riuscita!");
-                    socket_wptr = boost::weak_ptr<ssl::stream<tcp::socket>>(socket_);
+                    Message::setSocket(boost::weak_ptr<ssl::stream<tcp::socket>>(socket_));
                     break;
 
                 } catch (boost::system::system_error const &e) {
@@ -429,7 +438,7 @@ int main(int argc, char* argv[])
         try {
 
             //REQ
-            message.syncRead(socket_wptr);
+            message.syncRead();
             if (message.getType() != AUTH_REQ){
                 std::cerr<<"Auth Error!"<<std::endl;
                 return 1;
@@ -437,11 +446,11 @@ int main(int argc, char* argv[])
 
             //RES
             auto authMessage = Message(auth_data);
-            authMessage.syncWrite(socket_wptr);
+            authMessage.syncWrite();
 
             //Scambio lista file
-            Message(fileListW).syncWrite(socket_wptr);
-            message.syncRead(socket_wptr);
+            Message(fileListW).syncWrite();
+            message.syncRead();
             fileListR = message.extractFileList();
 
             if(!fileListR.has_value()){
@@ -493,20 +502,19 @@ int main(int argc, char* argv[])
         limit_cv.notify_all();
 
         socket_->lowest_layer().cancel();
-        socket_->shutdown();
-        socket_->lowest_layer().close();
-        socket_.reset(new ssl::stream<tcp::socket>(ioc, ctx));
-        socket_->set_verify_mode(boost::asio::ssl::verify_peer);
-        socket_->set_verify_callback(verify_certificate);
 
         if(rt.joinable())   rt.join();
         if(fwt.joinable())  fwt.join();
         if(fdt.joinable())  fdt.join();
         if(fut.joinable())  fut.join();
 
+            socket_->lowest_layer().close();
+            socket_.reset(new ssl::stream<tcp::socket>(ioc, ctx));
+            socket_->set_verify_mode(boost::asio::ssl::verify_peer);
+            socket_->set_verify_callback(verify_certificate);
+
         download_pool.clear();
         upload_pool.clear();
 
     }
-    return 0;
 }

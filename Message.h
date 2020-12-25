@@ -59,13 +59,15 @@ class Message {
     static std::mutex syncR_mtx;
     static std::mutex syncW_mtx;
 
+    static boost::weak_ptr<ssl::stream<tcp::socket>> socket_wptr;
 
     void hashData();    //Calcolo digest
     static unsigned char* HEXtoUnsignedChar(const std::string& src);    //Conversione da string ad unsigned char*
     static unsigned char *generate_salt(int salt_length);   //Produzione sale crittografico
 
-
 public:
+
+    static void setSocket(boost::weak_ptr<ssl::stream<tcp::socket>> socket_wptr_);
 
     Message(const Message& m);  //Costruttore di copia
     Message(Message &&src) noexcept;    //Costruttore di movimento
@@ -100,9 +102,9 @@ public:
 
     std::optional<std::map<std::string, std::string>> extractFileList();  //Estrazione mappa<file/directory, hash> dal campo data
 
-    void syncRead(const boost::weak_ptr<ssl::stream<tcp::socket>> &socket_wptr);    //Lettura sincrona del messaggio da boost_socket
+    void syncRead();    //Lettura sincrona del messaggio da boost_socket
 
-    void syncWrite(const boost::weak_ptr<ssl::stream<tcp::socket>> &socket_wptr) const;  //Scrittura sincrona del messaggio su boost_socket
+    void syncWrite() const;  //Scrittura sincrona del messaggio su boost_socket
 
     static std::string unsignedCharToHEX(unsigned char *src, size_t src_length);  //Conversione da unsigned char* a string
 
