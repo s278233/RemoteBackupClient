@@ -346,7 +346,8 @@ int main(int argc, char* argv[])
 
     //Dati di autenticazione (WARNING!: per motivi di debug il sale è identico per tutti i client)
     auto username = std::string(argv[3]);
-    SafeCout::set_log_path("../" + username + "_log.txt");
+    if(username == "logs") throw std::runtime_error("Wrong Username/Password!");
+    SafeCout::set_log_path("../logs/", username + "_log.txt");
     auto password = std::string(argv[4]);
     std::string salt = "1238e37cc78ea0ad4a2d44ecf4b5f89919a72f76f1d097ca860689c96ea1347f210afca88c437344fc69ffd90936c979b822af9b0ee284855aa80ddda3";
     auto auth_data = std::pair<std::string, std::string>(username, Message::compute_password(password, salt, ITERATIONS, KEY_LENGTH));

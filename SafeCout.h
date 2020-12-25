@@ -38,8 +38,11 @@ public:
         }
     }
 
-    static void set_log_path(const std::string& log_path_){
-        log_path = log_path_;
+    static void set_log_path(const std::string& log_directory, const std::string& log_filename){
+        if(!std::filesystem::exists(log_directory))
+            std::filesystem::create_directory(log_directory);
+
+        log_path = log_directory + log_filename;
     }
 
 
