@@ -469,9 +469,6 @@ int main(int argc, char* argv[])
         //Avvio tutti i thread
         running.store(true);
 
-        //Avvio il thread che gestisce il FileWatcher
-        std::thread fwt(FileWatcherThread, fw);
-
         //Avvio il thread che gestisce i messaggi in entrata
         std::thread rt(ReceiverThread);
 
@@ -480,6 +477,9 @@ int main(int argc, char* argv[])
 
         //Avvio il thread che gestice l'upload dei file
         std::thread fut(FileUploaderDispatcherThread);
+
+        //Avvio il thread che gestisce il FileWatcher
+        std::thread fwt(FileWatcherThread, fw);
 
         //Gestisco possibili connection lost
         std::unique_lock<std::mutex> lck(reconnection_mtx);
@@ -492,7 +492,7 @@ int main(int argc, char* argv[])
         upload_cv.notify_all();
         limit_cv.notify_all();
 
-        //socket_->shutdown();
+        socket_->shutdown();
         socket_->lowest_layer().close();
         socket_.reset(new ssl::stream<tcp::socket>(ioc, ctx));
         socket_->set_verify_mode(boost::asio::ssl::verify_peer);
