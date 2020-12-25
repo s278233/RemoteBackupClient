@@ -10,7 +10,6 @@
 
 #define MAX_DOWNLOAD_POOL   100
 
-
 #define ITERATIONS  10001
 #define KEY_LENGTH  61
 
@@ -48,8 +47,6 @@ void checkDifferences(const std::map<std::string, std::string>& src,std::map<std
 }
 
 void FileWatcherThread(FileWatcher fw){
-
-    while(!running.load());
 
     SafeCout::safe_cout("FileWatcher Thread avviato");
 
@@ -93,46 +90,55 @@ void FileWatcherThread(FileWatcher fw){
 }
 
 void FileUploaderDispatcherThread(){
-    std::unique_lock<std::mutex> lck(upload_mtx, std::defer_lock);
     std::ifstream ifs;
     std::vector<char> buffer( CHUNK_SIZE );
     size_t size;
     Message message;
     std::string path;
 
-    while(!running.load());
-
     SafeCout::safe_cout("FileUploader Thread avviato ");
+
 
     try {
         while (running.load()) {
 
-            lck.lock();
+            {
+                std::unique_lock<std::mutex> lck(upload_mtx);
 
-            upload_cv.wait(lck, [](){
-                return (!upload_pool.empty() || !running.load());
-            });
-            if (!running.load()) break;
+                upload_cv.wait(lck, []() {
+                    return (!upload_pool.empty() || !running.load());
+                });
 
-            path = upload_pool.back().first;
+                if (!running.load()) break;
 
-            lck.unlock();
+                path = upload_pool.back().first;
+                upload_pool.pop_back();
+            }
 
-            SafeCout::safe_cout("uploading ", path);
 
             //Upload cartella
             if (std::filesystem::is_directory(path)) {
+                SafeCout::safe_cout("uploading dir", path);
                 message = Message(DIR, std::vector<char>(path.begin(), path.end()));
                 message.syncWrite(socket_wptr);
+                SafeCout::safe_cout("uploaded dir", path);
             } else {
                 //Upload file
+                SafeCout::safe_cout("uploading file", path);
                 ifs.open(path, std::ios::binary);
                 message = Message(FILE_START, std::vector<char>(path.begin(), path.end()));
                 message.syncWrite(socket_wptr);
                 if (std::filesystem::file_size(path) != 0)
                     while (!ifs.eof()) {
+
+                        if(!std::filesystem::exists(path)) {
+                            SafeCout::safe_cout("File Erased while uploading!");
+                            break;
+                        }
+
                         ifs.read(buffer.data(), buffer.size());
                         size = ifs.gcount();
+
                         if (size < CHUNK_SIZE)
                             buffer.resize(size);
                         message = Message(FILE_DATA, buffer);
@@ -143,36 +149,24 @@ void FileUploaderDispatcherThread(){
                 ifs.close();
                 message = Message(FILE_END);
                 message.syncWrite(socket_wptr);
+                if(std::filesystem::exists(path))
+                SafeCout::safe_cout("uploaded file", path);
             }
-            SafeCout::safe_cout("uploaded ", path);
-            lck.lock();
-            upload_pool.pop_back();
-            lck.unlock();
         }
-            lck.lock();
-            upload_pool.clear();
-            lck.unlock();
-            SafeCout::safe_cout("FileUploader Thread terminato");
     }catch (boost::system::system_error const &e) {
         SafeCout::safe_cout("FileUploader connection exception: ", e.what());
-            lck.lock();
-            upload_pool.clear();
-            lck.unlock();
-            reconnection_cv.notify_one();
     } catch (const std::exception &e) {
         SafeCout::safe_cout("FileUploader exception: ", e.what());
     }
-
+    SafeCout::safe_cout("FileUploader Thread terminato");
+    reconnection_cv.notify_one();
 }
 
 void FileDownloaderDispatcherThread(){
     Message message;
-    std::unique_lock<std::mutex> lck(download_mtx, std::defer_lock);
     std::ofstream ofs;
     std::string path;
     std::string tmp_path;
-
-    while(!running.load());
 
     SafeCout::safe_cout("FileDownloader Thread avviato ");
 
@@ -180,28 +174,29 @@ void FileDownloaderDispatcherThread(){
 
         while (running.load()) {
 
-            lck.lock();
+            {
+                std::unique_lock<std::mutex> lck(download_mtx);
 
-            download_cv.wait(lck, []() {
-                return (!download_pool.empty() || !running.load());
-            });
-            if (!running.load()) break;
+                download_cv.wait(lck, []() {
+                    return (!download_pool.empty() || !running.load());
+                });
 
-            message = download_pool.back();
-            download_pool.pop_back();
+                if (!running.load()) break;
 
-            lck.unlock();
+                message = download_pool.back();
+                download_pool.pop_back();
+            }
 
             limit_cv.notify_one();
 
+
             path = std::string(message.getData().begin(), message.getData().end());
 
-            SafeCout::safe_cout("downloading ", path);
-
             if(message.getType() == DIR) {
+                SafeCout::safe_cout("downloading dir", path);
                 FileWatcher::addPath(path, "");
                 std::filesystem::create_directory(path);
-                SafeCout::safe_cout("downloaded ", path);
+                SafeCout::safe_cout("downloaded dir ", path);
             }
 
             else if (message.getType() != FILE_START) {
@@ -209,36 +204,39 @@ void FileDownloaderDispatcherThread(){
 
             } else {
 
+                SafeCout::safe_cout("downloading file", path);
+
                 tmp_path = path.substr(0, path.find_last_of('/') +1 ) + TMP_PLACEHOLDER;
 
                 ofs.open(tmp_path, std::ios::binary);
 
                 while (true) {
 
-                    lck.lock();
+                    {
+                        std::unique_lock<std::mutex> lck(download_mtx);
 
-                    download_cv.wait(lck, [](){
-                        return (!download_pool.empty() || !running.load());
-                    });
+                        download_cv.wait(lck, []() {
+                            return (!download_pool.empty() || !running.load());
+                        });
 
-                    if(!running.load()){
-                        ofs.close();
-                        std::remove(tmp_path.c_str());
-                        break;
+                        if(!running.load()){
+                            ofs.close();
+                            std::remove(tmp_path.c_str());
+                            break;
+                        }
+
+                        message = download_pool.back();
+                        download_pool.pop_back();
                     }
 
-                    message = download_pool.back();
-
-                    download_pool.pop_back();
-
-                    lck.unlock();
-
                     limit_cv.notify_one();
+
+
 
                     if (message.getType() == FILE_END) {
                         ofs.close();
                         FileWatcher::addPath(path, tmp_path);
-                        SafeCout::safe_cout("downloaded ", path);
+                        SafeCout::safe_cout("downloaded file", path);
                         break;
                     }
 
@@ -254,41 +252,37 @@ void FileDownloaderDispatcherThread(){
                 }
             }
         }
-        download_pool.clear();
-        SafeCout::safe_cout("FileDownloader Thread terminato");
     } catch (boost::system::system_error const &e) {
         SafeCout::safe_cout("FileDownloader connection exception: ", e.what());
         ofs.close();
         std::remove(tmp_path.c_str());
-        download_pool.clear();
-        reconnection_cv.notify_one();
     }catch (const std::exception &e) {
         ofs.close();
         std::remove(tmp_path.c_str());
         SafeCout::safe_cout("FileDownloader exception: ", e.what());
     }
-
-
+    SafeCout::safe_cout("FileDownloader Thread terminato");
+    reconnection_cv.notify_one();
 }
 
 void ReceiverThread(){
     Message message;
-    std::unique_lock<std::mutex> lck(download_mtx, std::defer_lock);
-
-    while(!running.load());
 
     SafeCout::safe_cout("Receiver Thread avviato");
 
     try {
-    while(running.load()){
+    while(running.load()) {
 
-        lck.lock();
+        {
+            std::unique_lock<std::mutex> lck(download_mtx);
 
-        limit_cv.wait(lck, [](){
+        limit_cv.wait(lck, []() {
             return (download_pool.size() < MAX_DOWNLOAD_POOL || !running.load());
         });
 
-        lck.unlock();
+        if (!running.load()) break;
+
+        }
 
                 //Ricezione messaggio
                 message.syncRead(socket_wptr);
@@ -305,24 +299,23 @@ void ReceiverThread(){
             case DIR:
             case FILE_START:
             case FILE_DATA:
-            case FILE_END:
-                lck.lock();
+            case FILE_END: {
+                std::lock_guard<std::mutex> lg(download_mtx);
                 download_pool.push_front(message);
-                lck.unlock();
+            }
                 download_cv.notify_one();
             break;
             default: SafeCout::safe_cout("Message type not recognized!");
             break;
         }
     }
-        SafeCout::safe_cout("Receiver Thread terminato");
     } catch (boost::system::system_error const &e) {
         SafeCout::safe_cout("Receiver connection exception: ", e.what());
-            reconnection_cv.notify_one();
     }catch (const std::exception &e) {
         SafeCout::safe_cout("Receiver exception: ", e.what());
     }
-
+    SafeCout::safe_cout("Receiver Thread terminato");
+    reconnection_cv.notify_one();
 }
 
 bool verify_certificate(bool preverified,
@@ -463,20 +456,7 @@ int main(int argc, char* argv[])
             return 1;
         }
 
-
         SafeCout::safe_cout("Autenticazione riuscita");
-
-        //Inizializzo il thread che gestisce il FileWatcher
-        std::thread fwt(FileWatcherThread, fw);
-
-        //Inizializzo il thread che gestisce i messaggi in entrata
-        std::thread rt(ReceiverThread);
-
-        //Inizializzo il thread che gestische i download dei file
-        std::thread fdt(FileDownloaderDispatcherThread);
-
-        //Inizializzo il thread che gestice l'upload dei file
-        std::thread fut(FileUploaderDispatcherThread);
 
         SafeCout::safe_cout("Processando le differenze...");
 
@@ -488,31 +468,43 @@ int main(int argc, char* argv[])
         //Avvio tutti i thread
         running.store(true);
 
+        //Avvio il thread che gestisce il FileWatcher
+        std::thread fwt(FileWatcherThread, fw);
+
+        //Avvio il thread che gestisce i messaggi in entrata
+        std::thread rt(ReceiverThread);
+
+        //Avvio il thread che gestische i download dei file
+        std::thread fdt(FileDownloaderDispatcherThread);
+
+        //Avvio il thread che gestice l'upload dei file
+        std::thread fut(FileUploaderDispatcherThread);
+
         //Gestisco possibili connection lost
-        while (running.load()) {
-            std::unique_lock<std::mutex> lck(reconnection_mtx);
-            reconnection_cv.wait(lck);
-            SafeCout::safe_cout("Connection lost, trying to reconnect...");
+        std::unique_lock<std::mutex> lck(reconnection_mtx);
+        reconnection_cv.wait(lck);
+        SafeCout::safe_cout("Connection lost, trying to reconnect...");
 
-            //Comunico a tutti i thread di terminare
-            running.store(false);
-            download_cv.notify_all();
-            upload_cv.notify_all();
+        //Comunico a tutti i thread di terminare
+        running.store(false);
+        download_cv.notify_all();
+        upload_cv.notify_all();
+        limit_cv.notify_all();
 
+        //socket_->shutdown();
+        socket_->lowest_layer().close();
+        socket_.reset(new ssl::stream<tcp::socket>(ioc, ctx));
+        socket_->set_verify_mode(boost::asio::ssl::verify_peer);
+        socket_->set_verify_callback(verify_certificate);
 
-            if(rt.joinable())   rt.join();
-            if(fwt.joinable())  fwt.join();
-            if(fdt.joinable())  fdt.join();
-            if(fut.joinable())  fut.join();
+        if(rt.joinable())   rt.join();
+        if(fwt.joinable())  fwt.join();
+        if(fdt.joinable())  fdt.join();
+        if(fut.joinable())  fut.join();
 
-            //socket_->shutdown();
-            socket_->lowest_layer().close();
-            socket_.reset(new ssl::stream<tcp::socket>(ioc, ctx));
-            socket_->set_verify_mode(boost::asio::ssl::verify_peer);
-            socket_->set_verify_callback(verify_certificate);
-            break;
-        }
-        ;
+        download_pool.clear();
+        upload_pool.clear();
+
     }
     return 0;
 }
