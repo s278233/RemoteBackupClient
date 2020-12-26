@@ -3,7 +3,7 @@ project(RemoteBackupClient)
 
 set(CMAKE_CXX_STANDARD 20)
 
-add_executable(RemoteBackupClient main.cpp Message.cpp Message.h FileWatcher.cpp FileWatcher.h SafeCout.h)
+add_executable(RemoteBackupClient main.cpp Message.cpp Message.h FileWatcher.cpp FileWatcher.h SafeCout.h Async.tpp)
 
 if(CMAKE_SYSTEM_NAME STREQUAL Linux OR CMAKE_SYSTEM_NAME STREQUAL Darwin)
     set(THREADS_PREFER_PTHREAD_FLAG ON)

@@ -41,25 +41,32 @@
 #include <boost/archive/text_oarchive.hpp>
 #include <boost/archive/text_iarchive.hpp>
 #include <boost/weak_ptr.hpp>
+#include <boost/make_unique.hpp>
 #include <boost/asio/ssl.hpp>
+#include <boost/enable_shared_from_this.hpp>
+#include <boost/bind.hpp>
+#include <functional>
 #include <cstring>
 #include <sstream>
 #include <iomanip>
-
+#include "SafeCout.h"
 
 using namespace boost::archive;
 using namespace boost::asio;
 using namespace boost::asio::ip;
 
-class Message {
+class Message: public boost::enable_shared_from_this<Message>{
     int type;
     std::vector<char> data{};
     std::string hash;
 
-    static std::mutex syncR_mtx;
-    static std::mutex syncW_mtx;
-
     static boost::weak_ptr<ssl::stream<tcp::socket>> socket_wptr;
+    static boost::weak_ptr<io_context::strand> strand_wptr;
+
+    std::array<char, HEADER_LENGTH> inbound_header_{};
+    std::vector<char> inbound_data_{};
+    std::string outbound_header_{};
+    std::string outbound_data_{};
 
     void hashData();    //Calcolo digest
     static unsigned char* HEXtoUnsignedChar(const std::string& src);    //Conversione da string ad unsigned char*
@@ -67,13 +74,7 @@ class Message {
 
 public:
 
-    static void setSocket(boost::weak_ptr<ssl::stream<tcp::socket>> socket_wptr_);
-
-    Message(const Message& m);  //Costruttore di copia
-    Message(Message &&src) noexcept;    //Costruttore di movimento
-    Message& operator= (const Message &m);  //Overload operatore di assegnazione tramite copia
-    Message& operator=(Message&& src) noexcept ;    //Overload operatore di assegnazione tramite movimento
-    virtual ~Message(); //Distruttore
+    static void setSocket(boost::weak_ptr<ssl::stream<tcp::socket>> socket_wptr_, boost::weak_ptr<io_context::strand> strand_wptr_);
 
     Message();  //Costruttore per messaggio vuoto
 
@@ -84,9 +85,6 @@ public:
     explicit Message(const std::pair<std::string, std::string>& authData);  //Costruttore per coppia<username, password>
 
     explicit Message(const std::map<std::string, std::string>& paths);    //Costruttore per mappa <file/directory, hash>
-
-
-    friend void swap(Message& src, Message& dst);   //SWAP
 
     friend std::ostream& operator<<(std::ostream &out, Message& m); //ToString
 
@@ -104,15 +102,22 @@ public:
 
     void syncRead();    //Lettura sincrona del messaggio da boost_socket
 
-    void syncWrite() const;  //Scrittura sincrona del messaggio su boost_socket
+    void syncWrite();  //Scrittura sincrona del messaggio su boost_socket
 
     static std::string unsignedCharToHEX(unsigned char *src, size_t src_length);  //Conversione da unsigned char* a string
 
     static std::string compute_password(const std::string& password, const std::string& salt, int iterations, int dkey_lenght); //PBKDF2
 
     friend class boost::serialization::access;
+
+    template <typename Handler>
+    void asyncWrite(Handler handler);
+
+    template <typename Handler>
+    void asyncRead(Handler handler);
 };
 
+#include "Async.tpp"
 
 
 #endif //REMOTEBACKUPCLIENT_MESSAGE_H

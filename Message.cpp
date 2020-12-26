@@ -1,46 +1,12 @@
 //
 // Created by lucio on 01/12/2020.
 //
-
-#include <deque>
-#include <utility>
 #include "Message.h"
 
-
-std::mutex Message::syncR_mtx;
-std::mutex Message::syncW_mtx;
 boost::weak_ptr<ssl::stream<tcp::socket>> Message::socket_wptr;
+boost::weak_ptr<io_context::strand> Message::strand_wptr;
 
 //COSTRUTTORI, OVERLOADS E DISTRUTTORE
-
-//Costruttore di copia
-Message::Message(const Message &m) {
-    this->type = m.type;
-    this->data = m.data;
-    this->hash= m.hash;
-}
-
-//Costruttore di movimento
-Message::Message(Message &&src) noexcept : type(INVALID){
-    this->hash.clear();
-    swap(*this, src);
-}
-
-//Overload operatore di assegnazione tramite copia
-Message &Message::operator=(const Message &src) {
-    Message copy(src);
-    swap(*this, copy);
-    return *this;
-}
-
-//Overload operatore di assegnazione tramite movimento
-Message &Message::operator=(Message&& src) noexcept{
-    swap(*this, src);
-    return *this;
-}
-
-//Distruttore
-Message::~Message() = default;
 
 //Costruttore per messaggio vuoto
 Message::Message() {
@@ -87,13 +53,6 @@ Message::Message(const std::map<std::string, std::string>& fileList) {
 
 
 //FUNZIONI DI SUPPORTO PUBBLICHE
-
-//SWAP
-void swap(Message &src, Message &dst) {
-    std::swap(src.type, dst.type);
-    std::swap(src.data, dst.data);
-    std::swap(src.hash, dst.hash);
-}
 
 //ToString
 std::ostream& operator<<(std::ostream &out, Message& m)
@@ -194,8 +153,6 @@ std::optional<std::map<std::string, std::string>> Message::extractFileList(){
 //Lettura sincrona del messaggio da boost_socket
 void Message::syncRead(){
 
-    std::lock_guard<std::mutex> lg(syncR_mtx);
-
     std::vector<char> header(HEADER_LENGTH);
     size_t message_length;
     size_t sizeR;
@@ -224,20 +181,18 @@ void Message::syncRead(){
 }
 
 //Scrittura sincrona del messaggio su boost_socket
-void Message::syncWrite() const{
-
-    std::lock_guard<std::mutex> lg(syncR_mtx);
+void Message::syncWrite() {
 
     //Serializzazione messaggio
     std::ostringstream archive_stream;
     auto ota = text_oarchive(archive_stream);
     ota << *this;
-    std::string outbound_data_ = archive_stream.str();
+    outbound_data_ = archive_stream.str();
 
     //Serializzazione header
     std::ostringstream header_stream;
     header_stream << std::setw(HEADER_LENGTH)<< std::hex << outbound_data_.size();
-    std::string outbound_header_ = header_stream.str();
+    outbound_header_ = header_stream.str();
 
     size_t sizeW;
 
@@ -345,6 +300,7 @@ unsigned char* Message::generate_salt(int salt_length){
         return salt;
 }
 
-void Message::setSocket(boost::weak_ptr<ssl::stream<tcp::socket>> socket_wptr_) {
+void Message::setSocket(boost::weak_ptr<ssl::stream<tcp::socket>> socket_wptr_, boost::weak_ptr<io_context::strand> strand_wptr_) {
 socket_wptr = std::move(socket_wptr_);
+strand_wptr = std::move(strand_wptr_);
 }
