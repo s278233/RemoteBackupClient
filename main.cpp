@@ -1,4 +1,5 @@
 #include <boost/asio/ssl.hpp>
+#include <list>
 #include <iostream>
 #include "Message.h"
 #include "FileWatcher.h"
