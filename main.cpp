@@ -1,6 +1,7 @@
 #include <boost/asio/ssl.hpp>
 #include <list>
 #include <iostream>
+#include <list>
 #include "Message.h"
 #include "FileWatcher.h"
 
@@ -12,6 +13,8 @@
 
 #define ITERATIONS  10001
 #define KEY_LENGTH  61
+
+#define LOG_DIR "../logs/"
 
 using namespace boost::archive;
 using namespace boost::asio;
@@ -105,7 +108,8 @@ void asyncFileWrite(const boost::shared_ptr<std::ifstream>& ifs, const std::stri
             }
             SafeCout::safe_cout("file uploaded ", path);
             ifs->close();
-            handler();
+            std::thread t(handler);
+            t.detach();
         });
         return;
     }
@@ -376,10 +380,17 @@ int main(int argc, char* argv[])
     //Dati di autenticazione (WARNING!: per motivi di debug il sale è identico per tutti i client)
     auto username = std::string(argv[3]);
     if(username == "logs") throw std::runtime_error("Wrong Username/Password!");
-    SafeCout::set_log_path("../logs/", username + "_log.txt");
     auto password = std::string(argv[4]);
     std::string salt = "1238e37cc78ea0ad4a2d44ecf4b5f89919a72f76f1d097ca860689c96ea1347f210afca88c437344fc69ffd90936c979b822af9b0ee284855aa80ddda3";
     auto auth_data = std::pair<std::string, std::string>(username, Message::compute_password(password, salt, ITERATIONS, KEY_LENGTH));
+
+    //Setto il logging
+    if(!std::filesystem::exists(LOG_DIR))
+        std::filesystem::create_directory(LOG_DIR);
+    auto log_path = std::string(LOG_DIR + username + "_log.txt");
+    if(std::filesystem::exists(log_path))
+        std::remove(log_path.c_str());
+    SafeCout::set_log_path(log_path);
 
     //Dati di connessione
     address dst_ip;
@@ -510,6 +521,7 @@ int main(int argc, char* argv[])
 
             //Avvio il thread che gestice l'upload dei file
             std::thread fut(FileUploaderDispatcher);
+            fut.detach();
             SafeCout::safe_cout("FileUploader avviato");
 
 
@@ -537,7 +549,7 @@ int main(int argc, char* argv[])
 
         if(fwt.joinable())  fwt.join();
         if(fdt.joinable())  fdt.join();
-        if(fut.joinable())  fut.join();
+//        if(fut.joinable())  fut.join();
         if(io.joinable())  io.join();
 
         ioc.restart();
