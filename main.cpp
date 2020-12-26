@@ -72,13 +72,13 @@ void FileWatcherThread(FileWatcher fw){
                 break;
             case FileStatus::erasedFile:
                 SafeCout::safe_cout("File erased: ", path_to_watch);
-                Message(FILE_DEL, std::vector<char>(path_to_watch.begin(), path_to_watch.end())).asyncWrite([](const boost::shared_ptr<Message>& self, int error){
+                boost::make_shared<Message>(FILE_DEL, std::vector<char>(path_to_watch.begin(), path_to_watch.end()))->asyncWrite([](const boost::shared_ptr<Message>& self, int error){
                     if(error) reconnection_cv.notify_one();
                });
                 break;
             case FileStatus::erasedDir:
                 SafeCout::safe_cout("Directory erased: ", path_to_watch);
-                Message(DIR_DEL, std::vector<char>(path_to_watch.begin(), path_to_watch.end())).asyncWrite([](const boost::shared_ptr<Message>& self, int error){
+                boost::make_shared<Message>(DIR_DEL, std::vector<char>(path_to_watch.begin(), path_to_watch.end()))->asyncWrite([](const boost::shared_ptr<Message>& self, int error){
                     if(error) reconnection_cv.notify_one();
                 });
                 break;
