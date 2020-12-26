@@ -37,10 +37,12 @@ static std::list<std::pair<std::string,FileStatus>> upload_pool;
 
 void checkDifferences(const std::map<std::string, std::string>& src,std::map<std::string, std::string>& dst){
     for(const auto& file:src)
-        if(!dst.contains(file.first) || (dst.contains(file.first) && file.second != dst[file.first])) {
-            upload_pool.push_front(std::pair(file.first, FileStatus::created));
-        } else if(file.second != dst[file.first]) {
-            upload_pool.push_front(std::pair(file.first, FileStatus::modified));
+        if(file.first.substr(file.first.find_last_of('/') + 1, file.first.length()).at(0) != '.') {
+            if (!dst.contains(file.first) || (dst.contains(file.first) && file.second != dst[file.first])) {
+                upload_pool.push_front(std::pair(file.first, FileStatus::created));
+            } else if (file.second != dst[file.first]) {
+                upload_pool.push_front(std::pair(file.first, FileStatus::modified));
+            }
         }
 }
 
@@ -53,10 +55,11 @@ void FileWatcherThread(FileWatcher fw){
         //Processo solo i file che non sono in download e i file/dir non corrotti
         if((!std::filesystem::is_regular_file(path_to_watch) && !std::filesystem::is_directory(path_to_watch))
         && status != FileStatus::erasedFile && status != FileStatus::erasedDir
-        || (path_to_watch.find(TMP_PLACEHOLDER) != std::string::npos)
+        || (path_to_watch.substr(path_to_watch.find_last_of('/') + 1, path_to_watch.length()).at(0) == '.')
         ) {
             return;
         }
+
 
         std::lock_guard<std::mutex> lg(upload_mtx);
 

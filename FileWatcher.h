@@ -21,7 +21,7 @@
 #include "SafeCout.h"
 #include "Message.h"
 
-#define TMP_PLACEHOLDER "tmpFileDownload.tmp"
+#define TMP_PLACEHOLDER ".tmpFileDownload.tmp"
 
 #define HASH_CHUNK_SIZE  1024
 
