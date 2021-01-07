@@ -40,7 +40,7 @@ void Message::asyncWrite(Handler handler) {
 //Lettura asincrona del messaggio da boost_socket
 template<typename Handler>
 void Message::asyncRead(Handler handler){
-    //SafeCout::safe_cout("read");
+//    SafeCout::safe_cout("read");
 
     strand_wptr.lock()->post([handler, self = shared_from_this()]{
 
