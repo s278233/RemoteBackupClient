@@ -49,9 +49,9 @@ void checkDifferences(const std::map<std::string, std::string>& src,std::map<std
         }
 }
 
-void FileWatcherThread(FileWatcher fw){
+void FileWatcherDispatcher(FileWatcher fw){
 
-    SafeCout::safe_cout("FileWatcher Thread avviato");
+    SafeCout::safe_cout("FileWatcher avviato");
 
     fw.start([] (const std::string& path_to_watch, FileStatus status) -> void {
         if(!running.load()) return;
@@ -92,7 +92,7 @@ void FileWatcherThread(FileWatcher fw){
         }
     });
 
-    SafeCout::safe_cout("FileWatcher Thread terminato");
+    SafeCout::safe_cout("FileWatcher terminated");
 }
 
 void asyncFileWrite(const boost::shared_ptr<std::ifstream>& ifs, const std::string& path, void handler()){
@@ -157,6 +157,7 @@ void FileUploaderDispatcher(){
                 });
 
                 if (!running.load()) {
+                    reconnection_cv.notify_one();
                     SafeCout::safe_cout("FileUploader terminated");
                     return;
                 }
@@ -166,27 +167,13 @@ void FileUploaderDispatcher(){
                 upload_pool.pop_back();
             }
 
-
-            //Upload/Cancellazione cartella
+            //Upload cartella
             if (std::filesystem::is_directory(path)) {
-                //Inoltro cancellazione cartella
-                if(status == FileStatus::erasedDir) {
-                    SafeCout::safe_cout("sumbitting dir erase ", path);
-                    auto message = boost::make_shared<Message>(DIR_DEL, std::vector<char>(path.begin(), path.end()));
-                    message->asyncWrite([path](const boost::shared_ptr<Message> &self, int error) {
-                        if (error) {
-                            reconnection_cv.notify_one();
-                            SafeCout::safe_cout("FileUploader terminated");
-                            return;
-                        }
-                        SafeCout::safe_cout("submitted dir erase ", path);
-                        FileUploaderDispatcher();
-                    });
-                }else {
-                    //Upload cartella
                     if(!std::filesystem::exists(path)){
                         SafeCout::safe_cout("Error uploading ", path, " (no such dir)");
-                        FileUploaderDispatcher();
+                        reconnection_cv.notify_one();
+                        SafeCout::safe_cout("FileUploader terminated");
+                        return;
                     }
                     SafeCout::safe_cout("uploading dir ", path);
                     auto message = boost::make_shared<Message>(DIR, std::vector<char>(path.begin(), path.end()));
@@ -197,28 +184,16 @@ void FileUploaderDispatcher(){
                             return;
                         }
                         SafeCout::safe_cout("uploaded dir ", path);
-                        FileUploaderDispatcher();
+                        std::thread t(FileUploaderDispatcher);
+                        t.detach();
                     });
-                }
-                //Upload/Cancellazione file
+            //Upload file
             } else if(std::filesystem::is_regular_file(path)){
-                if(status == FileStatus::erasedFile) {
-                    //Cancellazione file
-                    auto ifs = boost::make_shared<std::ifstream>(path, std::ios::binary);
-                    auto message = boost::make_shared<Message>(FILE_DEL, std::vector<char>(path.begin(), path.end()));
-                    message->asyncWrite([ifs, path](const boost::shared_ptr<Message> &self, int error) {
-                        if (error) {
-                            reconnection_cv.notify_one();
-                            SafeCout::safe_cout("FileUploader terminated");
-                            return;
-                        }
-                        SafeCout::safe_cout("submitted file erase ", path);
-                    });
-                }else {
-                    //Upload file
-                    if(!std::filesystem::exists(path)){
-                        SafeCout::safe_cout("Error uploading ", path, " (no such file)");
-                        FileUploaderDispatcher();
+                 if(!std::filesystem::exists(path)){
+                     SafeCout::safe_cout("Error uploading ", path, " (no such file)");
+                     reconnection_cv.notify_one();
+                     SafeCout::safe_cout("FileUploader terminated");
+                     return;
                     }
                     auto ifs = boost::make_shared<std::ifstream>(path, std::ios::binary);
                     auto message = boost::make_shared<Message>(FILE_START, std::vector<char>(path.begin(), path.end()));
@@ -231,8 +206,36 @@ void FileUploaderDispatcher(){
                         SafeCout::safe_cout("uploading file ", path);
                         asyncFileWrite(ifs, path, FileUploaderDispatcher);
                     });
-                }
-        }
+            //Cancellazione cartella
+        } else if(status == FileStatus::erasedDir) {
+        SafeCout::safe_cout("sumbitting dir erase ", path);
+        auto message = boost::make_shared<Message>(DIR_DEL, std::vector<char>(path.begin(), path.end()));
+        message->asyncWrite([path](const boost::shared_ptr<Message> &self, int error) {
+            if (error) {
+                reconnection_cv.notify_one();
+                SafeCout::safe_cout("FileUploader terminated");
+                return;
+            }
+            SafeCout::safe_cout("submitted dir erase ", path);
+            std::thread t(FileUploaderDispatcher);
+            t.detach();
+        });
+            //Cancellazione file
+        }else if(status == FileStatus::erasedFile) {
+                //Cancellazione file
+                auto ifs = boost::make_shared<std::ifstream>(path, std::ios::binary);
+                auto message = boost::make_shared<Message>(FILE_DEL, std::vector<char>(path.begin(), path.end()));
+                message->asyncWrite([ifs, path](const boost::shared_ptr<Message> &self, int error) {
+                    if (error) {
+                        reconnection_cv.notify_one();
+                        SafeCout::safe_cout("FileUploader terminated");
+                        return;
+                    }
+                    SafeCout::safe_cout("submitted file erase ", path);
+                    std::thread t(FileUploaderDispatcher);
+                    t.detach();
+                });
+            }
     }catch (boost::system::system_error const &e) {
         SafeCout::safe_cout("FileUploader connection exception: ", e.what());
         reconnection_cv.notify_one();
@@ -242,14 +245,14 @@ void FileUploaderDispatcher(){
     }
 }
 
-void FileDownloaderDispatcherThread(){
+void FileDownloaderDispatcher(){
     Message message;
     std::ofstream ofs;
     std::string path;
     std::string path_dir;
     std::string tmp_path;
 
-    SafeCout::safe_cout("FileDownloader Thread avviato ");
+    SafeCout::safe_cout("FileDownloader started ");
 
     try {
 
@@ -341,7 +344,7 @@ void FileDownloaderDispatcherThread(){
         std::remove(tmp_path.c_str());
         SafeCout::safe_cout("FileDownloader exception: ", e.what());
     }
-    SafeCout::safe_cout("FileDownloader Thread terminato");
+    SafeCout::safe_cout("FileDownloader terminated");
     reconnection_cv.notify_one();
 }
 
@@ -485,12 +488,12 @@ int main(int argc, char* argv[])
     socket_->set_verify_mode(boost::asio::ssl::verify_peer);
     socket_->set_verify_callback(verify_certificate);
 
-    SafeCout::safe_cout("FileWatcher inizializzazione...");
+    SafeCout::safe_cout("FileWatcher initialization...");
 
     //Inizializzo il filewatcher (viene effettuato un primo controllo all'avvio sui file)
     FileWatcher fw{"../" + username, std::chrono::milliseconds(5000), running};//5 sec di delay
 
-    SafeCout::safe_cout("FileWatcher inizializzato");
+    SafeCout::safe_cout("FileWatcher initialized");
 
         while(true) {
 
@@ -503,7 +506,7 @@ int main(int argc, char* argv[])
                     //Connessione col server
                     boost::asio::connect(socket_->lowest_layer(), endpoints, ec);
                     socket_->handshake(boost::asio::ssl::stream_base::client);
-                    SafeCout::safe_cout("Connessione Riuscita!");
+                    SafeCout::safe_cout("Connection Successful!");
                     Message::setSocket(boost::weak_ptr<ssl::stream<tcp::socket>>(socket_), boost::weak_ptr<io_context::strand>(strand_));
                     break;
 
@@ -520,7 +523,7 @@ int main(int argc, char* argv[])
 
 
         //Autenticazione(two-way)
-        SafeCout::safe_cout("Autenticazione...");
+        SafeCout::safe_cout("Autentication...");
 
         //Inizializzo fileList da inviare
         auto fileListW = FileWatcher::getPaths();
@@ -557,37 +560,37 @@ int main(int argc, char* argv[])
             return 1;
         }
 
-            SafeCout::safe_cout("Autenticazione riuscita");
+            SafeCout::safe_cout("Autentication succesful");
 
-            SafeCout::safe_cout("Processando le differenze...");
+            SafeCout::safe_cout("Processing differences...");
 
             //Processo differenze tra le fileList
             checkDifferences(fileListW, fileListR.value());
 
-            SafeCout::safe_cout("Differenze aggiornate");
+            SafeCout::safe_cout("Differences updated");
 
-            //Avvio tutti i thread
+            //Avvio tutti i componenti
             running.store(true);
 
             //Avvio la funzione asincrona che gestisce i messaggi in entrata
-            SafeCout::safe_cout("Receiver avviato");
+            SafeCout::safe_cout("Receiver started");
             Receiver();
 
             //Avvio il thread che gestische i download dei file
-            std::thread fdt(FileDownloaderDispatcherThread);
+            std::thread fdt(FileDownloaderDispatcher);
 
             //Avvio il thread che gestice l'upload dei file
             std::thread fut(FileUploaderDispatcher);
             fut.detach();
-            SafeCout::safe_cout("FileUploader avviato");
+            SafeCout::safe_cout("FileUploader started");
 
 
             //Avvio il thread che gestisce il FileWatcher
-            std::thread fwt(FileWatcherThread, fw);
+            std::thread fwt(FileWatcherDispatcher, fw);
 
             //Avvio il thread che gestisce l'i/o context
-            SafeCout::safe_cout("I/O Thread avviato");
-            std::thread io([&ioc] { ioc.run(); SafeCout::safe_cout("I/O Thread terminato");});
+            SafeCout::safe_cout("I/O Thread started");
+            std::thread io([&ioc] { ioc.run(); SafeCout::safe_cout("I/O Thread terminated");});
 
             //Gestisco possibili connection lost
             std::unique_lock<std::mutex> lck(reconnection_mtx);
