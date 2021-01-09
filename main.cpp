@@ -42,9 +42,12 @@ void checkDifferences(const std::map<std::string, std::string>& src,std::map<std
     for(const auto& file:src)
         if(file.first.substr(file.first.find_last_of('/') + 1, file.first.length()).at(0) != '.') {
             if (!dst.contains(file.first) || (dst.contains(file.first) && file.second != dst[file.first])) {
-                upload_pool.push_front(std::pair(file.first, FileStatus::created));
+                if(std::filesystem::is_regular_file(file.first))
+                upload_pool.push_front(std::pair(file.first, FileStatus::createdFile));
+                else if(std::filesystem::is_directory(file.first))
+                    upload_pool.push_front(std::pair(file.first, FileStatus::createdDir));
             } else if (file.second != dst[file.first]) {
-                upload_pool.push_front(std::pair(file.first, FileStatus::modified));
+                upload_pool.push_front(std::pair(file.first, FileStatus::modifiedFile));
             }
         }
 }
@@ -67,14 +70,19 @@ void FileWatcherDispatcher(FileWatcher fw){
         std::lock_guard<std::mutex> lg(upload_mtx);
 
         switch(status) {
-            case FileStatus::created:
+            case FileStatus::createdFile:
                 SafeCout::safe_cout("File created: ", path_to_watch);
-                upload_pool.push_front(std::pair(path_to_watch, FileStatus::created));
+                upload_pool.push_front(std::pair(path_to_watch, FileStatus::createdFile));
                 upload_cv.notify_one();
                 break;
-            case FileStatus::modified:
+            case FileStatus::createdDir:
+                SafeCout::safe_cout("Directory created: ", path_to_watch);
+                upload_pool.push_front(std::pair(path_to_watch, FileStatus::createdDir));
+                upload_cv.notify_one();
+                break;
+            case FileStatus::modifiedFile:
                 SafeCout::safe_cout("File modified: ", path_to_watch);
-                upload_pool.push_front(std::pair(path_to_watch, FileStatus::modified));
+                upload_pool.push_front(std::pair(path_to_watch, FileStatus::modifiedFile));
                 upload_cv.notify_one();
                 break;
             case FileStatus::erasedFile:
@@ -168,7 +176,7 @@ void FileUploaderDispatcher(){
             }
 
             //Upload cartella
-            if (std::filesystem::is_directory(path)) {
+            if (status == FileStatus::createdDir) {
                     if(!std::filesystem::exists(path)){
                         SafeCout::safe_cout("Error uploading ", path, " (no such dir)");
                         reconnection_cv.notify_one();
@@ -188,7 +196,7 @@ void FileUploaderDispatcher(){
                         t.detach();
                     });
             //Upload file
-            } else if(std::filesystem::is_regular_file(path)){
+            } else if(status == FileStatus::createdFile || status == FileStatus::modifiedFile){
                  if(!std::filesystem::exists(path)){
                      SafeCout::safe_cout("Error uploading ", path, " (no such file)");
                      reconnection_cv.notify_one();
@@ -623,5 +631,7 @@ int main(int argc, char* argv[])
             upload_pool.clear();
 
             ioc.restart();
+
+            std::this_thread::sleep_for(std::chrono::seconds(RECONN_DELAY));
         }
 }

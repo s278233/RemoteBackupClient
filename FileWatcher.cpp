@@ -91,15 +91,19 @@ void FileWatcher::start(const std::function<void (std::string, FileStatus)> &act
             }
 
 
-            // Check if a file was created or modified
+            // Rilevo creazione e modifica file/directory
             for (auto &file : std::filesystem::recursive_directory_iterator(path_to_watch)) {
-
-                // Creazione file
                 if (!paths_.contains(file.path().string())) {
-                    if(file.is_regular_file())
+                    // Creazione file
+                    if(file.is_regular_file()) {
                         paths_[file.path().string()] = fileHash(file.path().string());
-                    else paths_[file.path().string()] = "";
-                    action(file.path().string(), FileStatus::created);
+                        action(file.path().string(), FileStatus::createdFile);
+                    }
+                    // Creazione directory
+                    else {
+                        paths_[file.path().string()] = "";
+                        action(file.path().string(), FileStatus::createdDir);
+                    }
                     if (!running_.load()) return;
                 }
                 // Modifica file
@@ -108,7 +112,7 @@ void FileWatcher::start(const std::function<void (std::string, FileStatus)> &act
                     if (paths_[file.path().string()] != recomputedHash) {
                         paths_[file.path().string()] = recomputedHash;
                         recomputedHash = "";
-                        action(file.path().string(), FileStatus::modified);
+                        action(file.path().string(), FileStatus::modifiedFile);
                         if (!running_.load()) return;
                     }
                 }

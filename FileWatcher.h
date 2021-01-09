@@ -26,7 +26,7 @@
 #define HASH_CHUNK_SIZE  1024
 
 // Define available file changes
-enum class FileStatus {created, modified, erasedFile, erasedDir};
+enum class FileStatus {createdFile, createdDir, modifiedFile, erasedFile, erasedDir};
 
  class FileWatcher {
      static std::map<std::string, std::string> paths_;
