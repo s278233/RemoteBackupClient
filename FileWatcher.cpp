@@ -13,13 +13,19 @@ std::string FileWatcher::fileHash(const std::string& file){
     std::ifstream ifs;
     std::vector<char> buffer(HASH_CHUNK_SIZE);
 
+    success = SHA256_Init(&sha256);
+
+    if(!success) return "";
+
     //Lettura + hash chunk file
     ifs.open(file, std::ios::binary);
     while(!ifs.eof()) {
+        if(!std::filesystem::exists(file)) {
+            success = 0;
+            break;
+        }
         ifs.read(buffer.data(), HASH_CHUNK_SIZE);
         size_t size= ifs.gcount();
-        success = SHA256_Init(&sha256);
-        if(!success) break;
         success = SHA256_Update(&sha256, buffer.data(), size);
         if(!success) break;
     }
@@ -59,7 +65,7 @@ FileWatcher::FileWatcher(const std::string& path_to_watch, std::chrono::duration
 void FileWatcher::start(const std::function<void (std::string, FileStatus)> &action) {
     std::string recomputedHash;
 
-    while(running_.load()) {
+    while(true) {
         //Dorme per un tempo pari a delay
         std::this_thread::sleep_for(delay);
 
@@ -84,11 +90,12 @@ void FileWatcher::start(const std::function<void (std::string, FileStatus)> &act
                         action(it->first, FileStatus::erasedFile);
                     }
                     it = paths_.erase(it);
-                    if (!running_.load()) return;
                 } else {
                     it++;
                 }
             }
+
+            if (!running_.load()) return;
 
 
             // Rilevo creazione e modifica file/directory
@@ -104,7 +111,6 @@ void FileWatcher::start(const std::function<void (std::string, FileStatus)> &act
                         paths_[file.path().string()] = "";
                         action(file.path().string(), FileStatus::createdDir);
                     }
-                    if (!running_.load()) return;
                 }
                 // Modifica file
                 if (!std::filesystem::is_directory(file.path().string())) {
@@ -113,7 +119,6 @@ void FileWatcher::start(const std::function<void (std::string, FileStatus)> &act
                         paths_[file.path().string()] = recomputedHash;
                         recomputedHash = "";
                         action(file.path().string(), FileStatus::modifiedFile);
-                        if (!running_.load()) return;
                     }
                 }
             }

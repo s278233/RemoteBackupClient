@@ -56,49 +56,55 @@ void FileWatcherDispatcher(FileWatcher fw){
 
     SafeCout::safe_cout("FileWatcher avviato");
 
-    fw.start([] (const std::string& path_to_watch, FileStatus status) -> void {
-        if(!running.load()) return;
-        //Processo solo i file che non sono in download e i file/dir non corrotti
-        if((!std::filesystem::is_regular_file(path_to_watch) && !std::filesystem::is_directory(path_to_watch))
-        && status != FileStatus::erasedFile && status != FileStatus::erasedDir
-        || (path_to_watch.substr(path_to_watch.find_last_of('/') + 1, path_to_watch.length()).at(0) == '.')
-        ) {
-            return;
-        }
+    try {
+
+        fw.start([](const std::string &path_to_watch, FileStatus status) -> void {
+            //Processo solo i file che non sono in download e i file/dir non corrotti
+            if ((!std::filesystem::is_regular_file(path_to_watch) && !std::filesystem::is_directory(path_to_watch))
+                && status != FileStatus::erasedFile && status != FileStatus::erasedDir
+                || (path_to_watch.substr(path_to_watch.find_last_of('/') + 1, path_to_watch.length()).at(0) == '.')
+                    ) {
+                return;
+            }
 
 
-        std::lock_guard<std::mutex> lg(upload_mtx);
+            std::lock_guard<std::mutex> lg(upload_mtx);
 
-        switch(status) {
-            case FileStatus::createdFile:
-                SafeCout::safe_cout("File created: ", path_to_watch);
-                upload_pool.push_front(std::pair(path_to_watch, FileStatus::createdFile));
-                upload_cv.notify_one();
-                break;
-            case FileStatus::createdDir:
-                SafeCout::safe_cout("Directory created: ", path_to_watch);
-                upload_pool.push_front(std::pair(path_to_watch, FileStatus::createdDir));
-                upload_cv.notify_one();
-                break;
-            case FileStatus::modifiedFile:
-                SafeCout::safe_cout("File modified: ", path_to_watch);
-                upload_pool.push_front(std::pair(path_to_watch, FileStatus::modifiedFile));
-                upload_cv.notify_one();
-                break;
-            case FileStatus::erasedFile:
-                SafeCout::safe_cout("File erased: ", path_to_watch);
-                upload_pool.push_front(std::pair(path_to_watch, FileStatus::erasedFile));
-                upload_cv.notify_one();
-                break;
-            case FileStatus::erasedDir:
-                SafeCout::safe_cout("Directory erased: ", path_to_watch);
-                upload_pool.push_front(std::pair(path_to_watch, FileStatus::erasedDir));
-                upload_cv.notify_one();
-                break;
-            default:
-                SafeCout::safe_cout("Error! Unknown file status.");
-        }
-    });
+            switch (status) {
+                case FileStatus::createdFile:
+                    SafeCout::safe_cout("File created: ", path_to_watch);
+                    upload_pool.push_front(std::pair(path_to_watch, FileStatus::createdFile));
+                    upload_cv.notify_one();
+                    break;
+                case FileStatus::createdDir:
+                    SafeCout::safe_cout("Directory created: ", path_to_watch);
+                    upload_pool.push_front(std::pair(path_to_watch, FileStatus::createdDir));
+                    upload_cv.notify_one();
+                    break;
+                case FileStatus::modifiedFile:
+                    SafeCout::safe_cout("File modified: ", path_to_watch);
+                    upload_pool.push_front(std::pair(path_to_watch, FileStatus::modifiedFile));
+                    upload_cv.notify_one();
+                    break;
+                case FileStatus::erasedFile:
+                    SafeCout::safe_cout("File erased: ", path_to_watch);
+                    upload_pool.push_front(std::pair(path_to_watch, FileStatus::erasedFile));
+                    upload_cv.notify_one();
+                    break;
+                case FileStatus::erasedDir:
+                    SafeCout::safe_cout("Directory erased: ", path_to_watch);
+                    upload_pool.push_front(std::pair(path_to_watch, FileStatus::erasedDir));
+                    upload_cv.notify_one();
+                    break;
+                default:
+                    SafeCout::safe_cout("Error! Unknown file status.");
+            }
+        });
+
+    } catch (const std::exception &e) {
+    SafeCout::safe_cout("FileWatcher exception: ", e.what());
+    reconnection_cv.notify_one();
+}
 
     SafeCout::safe_cout("FileWatcher terminated");
 }
@@ -481,6 +487,11 @@ int main(int argc, char* argv[])
         throw std::runtime_error("Invalid Port");
     }
 
+    SafeCout::safe_cout("FileWatcher initialization...");
+    //Inizializzo il filewatcher (viene effettuato un primo controllo all'avvio sui file)
+    FileWatcher fw("../" + username, std::chrono::milliseconds(5000), running);
+    SafeCout::safe_cout("FileWatcher initialized");
+
     //Setup iniziale SSL
     boost::asio::ssl::context ctx(boost::asio::ssl::context::tlsv12_client);
     ctx.load_verify_file("../sec-files/rootca.crt");
@@ -496,16 +507,12 @@ int main(int argc, char* argv[])
     socket_->set_verify_mode(boost::asio::ssl::verify_peer);
     socket_->set_verify_callback(verify_certificate);
 
-    SafeCout::safe_cout("FileWatcher initialization...");
-
-    //Inizializzo il filewatcher (viene effettuato un primo controllo all'avvio sui file)
-    FileWatcher fw{"../" + username, std::chrono::milliseconds(5000), running};//5 sec di delay
-
-    SafeCout::safe_cout("FileWatcher initialized");
 
         while(true) {
 
             work_guard_type work_guard(ioc.get_executor());
+
+
 
             while (!running.load()) {
 
@@ -530,12 +537,17 @@ int main(int argc, char* argv[])
             }
 
 
-        //Autenticazione(two-way)
-        SafeCout::safe_cout("Autentication...");
+
 
         //Inizializzo fileList da inviare
         auto fileListW = FileWatcher::getPaths();
+        //Evito sovrapposizioni in caso di rinominazione multipla delle cartelle
+        for(auto & it : upload_pool)
+            fileListW[it.first] = "";
         std::optional<std::map<std::string, std::string>> fileListR;
+
+            //Autenticazione(two-way)
+            SafeCout::safe_cout("Autentication...");
 
         try {
 
@@ -627,8 +639,14 @@ int main(int argc, char* argv[])
             socket_->set_verify_mode(boost::asio::ssl::verify_peer);
             socket_->set_verify_callback(verify_certificate);
 
+            //Pulisco la download pool
             download_pool.clear();
-            upload_pool.clear();
+
+            //Pulisco la upload pool(eccetto i file da eliminare per evitare sovrapposizioni)
+            for(auto it=upload_pool.begin(); it!=upload_pool.end();)
+                if(it->second != FileStatus::erasedDir)
+                    it=upload_pool.erase(it);
+                else it++;
 
             ioc.restart();
 
